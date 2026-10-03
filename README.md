@@ -1,4 +1,80 @@
-# TS3AudioBot
+# TS3AudioBot (kaiser62 fork)
+
+> Fork of [Splamy/TS3AudioBot](https://github.com/Splamy/TS3AudioBot) at upstream `a69a38d8` (v0.12.x, netcoreapp3.1).
+> Everything below the "Upstream README" line is the original upstream README.
+
+## Changes from upstream
+
+### 1. Per-bot channel step log (`channel_log`) — code change
+Branch `feature/channel-step-log`, version `0.12.4-channel-step-log.*`.
+
+New per-bot setting in `bots/<name>/bot.toml` (root level, default `false`):
+
+```toml
+channel_log = true
+```
+
+When enabled, the bot posts every step of a request into its current channel chat (prefixed with `»`), and mirrors each line to the normal log as `[channel_log] ...`:
+
+| Stage | Example messages |
+|---|---|
+| Request | `Request from <nick>: !ytp foo` · `Command failed: ...` · `Command crashed: ...` |
+| Search | `Searching youtube for 'foo'` · `Found 10 results, first: '...'` |
+| Resolve | `Trying resolver youtube` · `Resolved ... with youtube in 1234ms` · `Resolver X failed after Nms: ...` |
+| YouTube | internal resolver attempt / fallback to yt-dlp · picked format (id, ext, acodec, abr) |
+| yt-dlp | `yt-dlp: running ...` · `done in Nms (KB)` · `failed after Nms (exit N): <stderr>` · `no answer after 20000ms, killing it` |
+| ffmpeg | `ffmpeg: started (pid N)` · `finished at 3:12 of 3:12` · exit code + last stderr lines (URLs redacted to `<url>`) · reconnect attempts |
+| Playback | `Starting audio stream for '...'` · `Now playing: ...` · `Skipping '...': reason` · `Song ended` · `Queue ended` |
+
+Implementation:
+- `TS3AudioBot/Helper/StepLog.cs` (new): `AsyncLocal` sink that flows through command → resolver → yt-dlp → player without changing method signatures.
+- `Bot.cs`: opens a StepLog scope per chat command and per song-end callback; `ChannelLog()` truncates to 900 chars and sends via `Scheduler.InvokeAsync` (failures only logged at debug).
+- Instrumented: `Audio/PlayManager.cs`, `Audio/FfmpegProducer.cs` (stderr ring buffer, exit reporting), `ResourceFactories/ResourceResolver.cs`, `ResourceFactories/Youtube/YoutubeResolver.cs`, `ResourceFactories/YoutubeDlHelper.cs` (timing, joined stderr lines).
+- `Config/ConfigStructs.cs`: `ConfBot.ChannelLog`.
+
+### 2. yt-dlp via Docker wrapper — deployment (`deploy/youtube-dl`)
+Upstream calls a local `youtube-dl` binary. This fork points `[factories.youtube-dl] path = "./youtube-dl"` at a bash wrapper that runs yt-dlp in the `jeeaaasustest/youtube-dl` image:
+- optional `cookies.txt` next to the wrapper is mounted and passed with `--cookies` (never commit it);
+- persistent yt-dlp cache volume (`$HOME/.cache/yt-dlp-docker` → `XDG_CACHE_HOME`) so player/JS-challenge results are reused instead of re-solved each call;
+- `--socket-timeout 5` so blackholed connections fail over fast instead of hitting the bot's hard 20s yt-dlp limit;
+- `--extractor-args youtube:skip=hls` to skip HLS manifest fetches (≈halves lookup time). **Trade-off:** YouTube live streams don't play.
+- optional stderr debug log (`YTDL_DEBUG_LOG=...`). Note the bot treats *any* stderr output from yt-dlp as failure.
+
+### 3. ffmpeg chunking shim — deployment (`deploy/ffmpeg-wrap.sh`, `deploy/ytchunk.py`)
+`[tools.ffmpeg] path = "./ffmpeg-wrap.sh"`. YouTube returns 403 on open-ended / ≥1 MiB `Range` requests, which is what ffmpeg sends for a googlevideo URL. The shim detects `-i *googlevideo.com*`, replaces the input with `pipe:0`, and streams the file via `ytchunk.py` using bounded 512 KiB range requests (5s timeout, 8 retries with backoff). All other inputs go straight to `/usr/bin/ffmpeg`. Exit status of ffmpeg is preserved; optional debug log via `FFMPEG_DEBUG_LOG`.
+
+### 4. yt-dlp auto-update — deployment (`deploy/update-ytdlp.sh`, `deploy/systemd/`)
+`ts3audiobot-ytdlp.timer` runs `update-ytdlp.sh` every 30 min: pulls the image, prunes old images, prints the yt-dlp version.
+System units must be `root:root 0644` (a user-writable unit with `User=` is a privilege-escalation path).
+
+### 5. Service / config
+- `deploy/systemd/ts3audiobot.service`: systemd **user** unit, `Restart=on-failure`, `PATH` includes `~/.deno/bin` (yt-dlp needs a JS runtime for YouTube challenges).
+- `ts3audiobot.toml` diffs from defaults: `prefer_resolver = "YoutubeDl"`, `youtube-dl path = "./youtube-dl"`, `ffmpeg path = "./ffmpeg-wrap.sh"`, web paths `"WebInterface"`.
+- Per-bot alias used on all bots: `ytp = "!x (!search from youtube (!param 0)) (!search play 0)"`.
+- **Never commit** `ts3audiobot.toml` (identity key), `cookies.txt`, `.env`, `bots/*/bot.toml` with server passwords.
+
+### 6. Building
+Upstream build tooling no longer works out of the box. Working recipe (in `mcr.microsoft.com/dotnet/sdk:3.1`):
+
+```bash
+dotnet tool install -g dotnet-script --version 1.1.0      # newer needs net8+
+dotnet tool install -g GitVersion.Tool --version 5.12.0   # newer needs net8+
+git config --global --add safe.directory /src
+dotnet publish TS3AudioBot -c Release --framework netcoreapp3.1 --self-contained --runtime linux-x64 \
+  -p:PublishSingleFile=true,IncludeSymbolsInSingleFile=true,PublishTrimmed=true
+```
+
+GitVersion needs local `master` and `develop` branches in the clone (`git fetch origin master:master develop:develop`), otherwise it fails with *"could not determine which branch to treat as development"*.
+
+### Known issues
+- On the production host ~40% of IPv4 TCP SYNs to Google IPs are silently dropped (other hosts on the LAN and non-Google destinations are fine); connects hang ~20s then fall back to IPv6 which is unreachable. The `--socket-timeout 5`, `skip=hls`, and ytchunk timeouts are mitigations, not a fix. Root cause (host firewall / VPN / router) still open.
+- YouTube live streams are disabled by `skip=hls`.
+
+---
+
+# Upstream README
+
+## TS3AudioBot (upstream)
 
 This is a open-source TeamSpeak3 bot, playing music and much more.  
 

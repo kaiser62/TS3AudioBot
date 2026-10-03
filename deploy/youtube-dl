@@ -1,0 +1,28 @@
+#!/bin/bash
+# Wrapper that calls yt-dlp inside Jeeaaasus Docker container
+# --- debug logging (added 2026-10-03): copy stderr to a log; bot still receives identical stderr ---
+HERE="$(cd "$(dirname "$0")" && pwd)"
+DBG_LOG="${YTDL_DEBUG_LOG:-/dev/null}"   # set e.g. YTDL_DEBUG_LOG=$HERE/logs/ytdl-debug.log to enable
+echo "=== $(date '+%F %T.%3N') pid=$$ START args: $*" >> "$DBG_LOG"
+exec 2> >(tee -a "$DBG_LOG" >&2; echo "=== $(date '+%F %T.%3N') pid=$$ END (stderr closed)" >> "$DBG_LOG")
+# --- end debug logging ---
+
+COOKIES="$HERE/cookies.txt"
+COOKIES_MOUNT=""
+COOKIES_FLAG=""
+
+if [ -f "$COOKIES" ]; then
+  COOKIES_MOUNT="-v $COOKIES:/config/cookies.txt"
+  COOKIES_FLAG="--cookies /config/cookies.txt"
+fi
+
+# Build command: yt-dlp + flags + all original args, properly quoted for sh -c
+ARGS=""
+for arg in "$@"; do
+  ARGS="$ARGS '$arg'"
+done
+
+exec docker run --rm $COOKIES_MOUNT \
+  -v "${YTDL_CACHE_DIR:-$HOME/.cache/yt-dlp-docker}":/cache -e XDG_CACHE_HOME=/cache \
+  jeeaaasustest/youtube-dl:latest \
+  sh -c "yt-dlp $COOKIES_FLAG --socket-timeout 5 --extractor-args youtube:skip=hls $ARGS"

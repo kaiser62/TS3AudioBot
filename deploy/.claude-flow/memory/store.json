@@ -1,0 +1,14 @@
+{
+  "entries": {
+    "cmd-1791058319916": {
+      "key": "cmd-1791058319916",
+      "value": "{\"command\":\"cd\",\"exitCode\":0,\"success\":true}",
+      "namespace": "commands",
+      "storedAt": "2026-10-03T20:11:59.916Z",
+      "lastAccessed": "2026-10-03T20:11:59.916Z",
+      "accessCount": 0,
+      "expiresAt": "2026-11-02T20:11:59.916Z"
+    }
+  },
+  "version": "3.0.0"
+}
