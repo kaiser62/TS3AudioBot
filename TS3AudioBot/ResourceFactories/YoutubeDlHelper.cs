@@ -13,7 +13,9 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using TS3AudioBot.Config;
@@ -163,9 +165,10 @@ namespace TS3AudioBot.ResourceFactories
 
 				if (stdErr.Length > 0)
 				{
-					Log.Debug("youtube-dl failed to load the resource:\n{0}", stdErr);
-					StepLog.Write($"yt-dlp: failed after {runTime.ElapsedMilliseconds}ms (exit {(tmproc.HasExitedSafe() ? tmproc.ExitCode.ToString() : "killed")}): {stdErr}");
-					throw Error.LocalStr(strings.error_ytdl_song_failed_to_load);
+					var errorOutput = stdErr.ToString();
+					Log.Debug("youtube-dl failed to load the resource:\n{0}", errorOutput);
+					StepLog.Write($"yt-dlp: failed after {runTime.ElapsedMilliseconds}ms (exit {(tmproc.HasExitedSafe() ? tmproc.ExitCode.ToString() : "killed")}): {errorOutput}");
+					throw Error.LocalStr(TransformYtdlError(errorOutput));
 				}
 
 				StepLog.Write($"yt-dlp: done in {runTime.ElapsedMilliseconds}ms ({stdOut.Length / 1024}KB of data)");
@@ -196,6 +199,9 @@ namespace TS3AudioBot.ResourceFactories
 			}
 		}
 
+		/// <summary>Picks the best audio format. Order of preference:
+		/// direct download over HLS manifest, audio-only over muxed video,
+		/// codec (opus / AAC-LC first), audio bitrate, then the smallest video for muxed formats.</summary>
 		public static JsonYtdlFormat? FilterBest(IEnumerable<JsonYtdlFormat>? formats)
 		{
 			Log.Debug("Picking from options: {@formats}", formats);
@@ -203,21 +209,73 @@ namespace TS3AudioBot.ResourceFactories
 			if (formats is null)
 				return null;
 
-			JsonYtdlFormat? best = null;
-			foreach (var format in formats)
-			{
-				if (format.acodec == "none")
-					continue;
-				if (best == null
-					|| format.abr > best.abr
-					|| (format.vcodec == "none" && format.abr >= best.abr))
-				{
-					best = format;
-				}
-			}
+			var best = formats
+				.Where(f => f.acodec != "none" && !string.IsNullOrEmpty(f.url))
+				.OrderBy(f => IsHls(f))
+				.ThenByDescending(f => IsAudioOnly(f))
+				.ThenByDescending(f => CodecRank(f.acodec))
+				.ThenByDescending(f => f.abr ?? (IsAudioOnly(f) ? f.tbr : null) ?? 0)
+				.ThenBy(f => (f.width ?? 0) * (f.height ?? 0))
+				.FirstOrDefault();
 
 			Log.Debug("Picked: {@format}", best);
 			return best;
+		}
+
+		public static bool IsAudioOnly(JsonYtdlFormat format) => format.vcodec == "none";
+
+		public static bool IsHls(JsonYtdlFormat format)
+			=> (format.protocol?.StartsWith("m3u8") ?? false)
+			|| (format.url != null && (format.url.Contains(".m3u8") || format.url.Contains("manifest.googlevideo.com")));
+
+		private static int CodecRank(string? acodec)
+		{
+			if (acodec is null) return 0;
+			if (acodec.StartsWith("opus") || acodec.StartsWith("mp4a.40.2")) return 3;
+			if (acodec.StartsWith("mp4a.40.5")) return 2; // HE-AAC, low bitrate
+			return 1;
+		}
+
+		/// <summary>Turns raw yt-dlp stderr into a short message a user can act on.</summary>
+		public static string TransformYtdlError(string errorOutput)
+		{
+			var err = errorOutput.ToLowerInvariant();
+			bool Has(params string[] patterns) => patterns.Any(p => err.Contains(p));
+
+			if (Has("not a bot"))
+				return "YouTube blocked the request with a bot check. Refresh cookies.txt or try again later.";
+			if (Has("confirm your age", "age-restricted", "age restricted", "inappropriate for some users"))
+				return "Video is age-restricted. It needs a cookies.txt from a logged-in account.";
+			if (Has("private video", "video is private"))
+				return "Video is private.";
+			if (Has("members-only", "join this channel"))
+				return "Video is members-only.";
+			if (Has("not available in your country", "geo restrict", "geo-restrict"))
+				return "Video is not available in the server's region.";
+			if (Has("premieres in", "live event will begin", "this live event"))
+				return "Video is a premiere or live event that has not started yet.";
+			if (Has("video unavailable", "has been removed", "this video is not available", "copyright claim", "account associated with this video has been terminated"))
+				return "Video is unavailable (removed or blocked).";
+			if (Has("http error 429", "too many requests"))
+				return "YouTube is rate-limiting this server (HTTP 429). Try again later.";
+			if (Has("http error 403"))
+				return "YouTube refused the request (HTTP 403). Try again; if it keeps happening yt-dlp may need an update.";
+			if (Has("no video formats", "requested format is not available", "no formats found"))
+				return "No playable formats found for this video.";
+			if (Has("cannot connect to the docker daemon", "unable to find image", "docker: "))
+				return "yt-dlp container could not be started (Docker error).";
+			if (Has("timed out", "timeout"))
+				return "yt-dlp timed out talking to YouTube. Try again.";
+			if (Has("network is unreachable", "name resolution", "temporary failure in name", "connection refused", "connection reset", "urlopen error"))
+				return "Network error while contacting YouTube. Try again.";
+
+			var errorLine = errorOutput.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.StartsWith("ERROR:"));
+			if (errorLine is null)
+				return strings.error_ytdl_song_failed_to_load;
+			errorLine = Regex.Replace(errorLine, @"^ERROR:\s*(\[[^\]]+\]\s*)?([\w-]{11}:\s*)?", "");
+			if (errorLine.Length > 200)
+				errorLine = errorLine.Substring(0, 200) + "...";
+			return $"yt-dlp: {errorLine}";
 		}
 
 		public static SongInfo MapToSongInfo(JsonYtdlDump dump)
@@ -309,6 +367,9 @@ namespace TS3AudioBot.ResourceFactories
 		public string? format_id { get; set; }
 		public string? url { get; set; }
 		public string? ext { get; set; }
+		public string? protocol { get; set; }
+		public int? width { get; set; }
+		public int? height { get; set; }
 	}
 
 	public class JsonYtdlPlaylistDump : JsonYtdlBase

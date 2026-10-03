@@ -32,6 +32,14 @@ Implementation:
 - Instrumented: `Audio/PlayManager.cs`, `Audio/FfmpegProducer.cs` (stderr ring buffer, exit reporting), `ResourceFactories/ResourceResolver.cs`, `ResourceFactories/Youtube/YoutubeResolver.cs`, `ResourceFactories/YoutubeDlHelper.cs` (timing, joined stderr lines).
 - `Config/ConfigStructs.cs`: `ConfBot.ChannelLog`.
 
+### 1b. Readable yt-dlp errors and better format selection — code change
+Branch `feature/ytdlp-errors-formats`, version `0.12.6-ytdlp-errors-formats.*`.
+
+- `YoutubeDlHelper.TransformYtdlError`: raw yt-dlp stderr is mapped to a short message for the user (bot check / refresh cookies, age-restricted, private, members-only, region-locked, removed, premiere not started, HTTP 429 / 403, no formats, Docker not reachable, timeout, network). Unknown errors show the cleaned `ERROR:` line. Upstream always said "failed to load". The raw stderr still goes to `channel_log`.
+- `YoutubeDlHelper.FilterBest` ranking: direct download over HLS → audio-only over muxed video → opus / AAC-LC over HE-AAC → audio bitrate → smallest video. Upstream picked the highest `abr` and could choose muxed format 18. `JsonYtdlFormat` gained `protocol`, `width`, `height`.
+- `YoutubeResolver`: if yt-dlp returns a reduced list with only muxed formats, it retries once to get the audio-only streams.
+- Tests: `TS3ABotUnitTests/YoutubeDlHelperTests.cs`.
+
 ### 2. yt-dlp via Docker wrapper — deployment (`deploy/youtube-dl`)
 Upstream calls a local `youtube-dl` binary. This fork points `[factories.youtube-dl] path = "./youtube-dl"` at a bash wrapper that runs yt-dlp in the `jeeaaasustest/youtube-dl` image:
 - optional `cookies.txt` next to the wrapper is mounted and passed with `--cookies` (never commit it);
