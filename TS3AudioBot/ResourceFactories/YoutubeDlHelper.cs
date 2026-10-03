@@ -121,6 +121,8 @@ namespace TS3AudioBot.ResourceFactories
 				tmproc.StartInfo.RedirectStandardOutput = true;
 				tmproc.StartInfo.RedirectStandardError = true;
 				tmproc.EnableRaisingEvents = true;
+				StepLog.Write($"yt-dlp: running {args.Trim()}");
+				var runTime = Stopwatch.StartNew();
 				tmproc.Start();
 				tmproc.OutputDataReceived += (s, e) =>
 				{
@@ -129,13 +131,21 @@ namespace TS3AudioBot.ResourceFactories
 					else
 						stdOut.Append(e.Data);
 				};
-				tmproc.ErrorDataReceived += (s, e) => stdErr.Append(e.Data);
+				tmproc.ErrorDataReceived += (s, e) =>
+				{
+					if (e.Data is null)
+						return;
+					if (stdErr.Length > 0)
+						stdErr.Append('\n');
+					stdErr.Append(e.Data);
+				};
 				tmproc.BeginOutputReadLine();
 				tmproc.BeginErrorReadLine();
 				await tmproc.WaitForExitAsync(TimeSpan.FromSeconds(20));
 
 				if (!tmproc.HasExitedSafe())
 				{
+					StepLog.Write($"yt-dlp: no answer after {runTime.ElapsedMilliseconds}ms, killing it (20s limit)");
 					try { tmproc.Kill(); }
 					catch (Exception ex) { Log.Debug(ex, "Failed to kill"); }
 				}
@@ -154,14 +164,17 @@ namespace TS3AudioBot.ResourceFactories
 				if (stdErr.Length > 0)
 				{
 					Log.Debug("youtube-dl failed to load the resource:\n{0}", stdErr);
+					StepLog.Write($"yt-dlp: failed after {runTime.ElapsedMilliseconds}ms (exit {(tmproc.HasExitedSafe() ? tmproc.ExitCode.ToString() : "killed")}): {stdErr}");
 					throw Error.LocalStr(strings.error_ytdl_song_failed_to_load);
 				}
 
+				StepLog.Write($"yt-dlp: done in {runTime.ElapsedMilliseconds}ms ({stdOut.Length / 1024}KB of data)");
 				return ParseResponse<T>(stdOut.ToString());
 			}
 			catch (Win32Exception ex)
 			{
 				Log.Error(ex, "Failed to run youtube-dl: {0}", ex.Message);
+				StepLog.Write($"yt-dlp: could not be started ({path}): {ex.Message}");
 				throw Error.Exception(ex).LocalStr(strings.error_ytdl_failed_to_run);
 			}
 		}

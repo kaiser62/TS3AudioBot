@@ -89,20 +89,24 @@ namespace TS3AudioBot.ResourceFactories
 			if (resolver is null)
 				throw CouldNotLoad(string.Format(strings.error_resfac_no_registered_factory, resource.AudioType));
 
+			StepLog.Write($"Resolving '{resource.ResourceTitle ?? resource.ResourceId}' with {resolver.ResolverFor}");
+			var sw = Stopwatch.StartNew();
 			try
 			{
-				var sw = Stopwatch.StartNew();
 				var result = await resolver.GetResourceById(ctx, resource);
 				Log.Debug("Took {0}ms to resolve resource.", sw.ElapsedMilliseconds);
+				StepLog.Write($"Resolved '{result.AudioResource.ResourceTitle ?? resource.ResourceId}' in {sw.ElapsedMilliseconds}ms");
 				return result;
 			}
 			catch (AudioBotException ex)
 			{
+				StepLog.Write($"Resolve failed after {sw.ElapsedMilliseconds}ms: {ex.Message}");
 				throw CouldNotLoad(ex.Message);
 			}
 			catch (Exception ex)
 			{
 				Log.Error(ex, "Resource resolver '{0}' threw while trying to resolve '{@resource}'", resolver.ResolverFor, resource);
+				StepLog.Write($"Resolver {resolver.ResolverFor} crashed after {sw.ElapsedMilliseconds}ms: {ex.GetType().Name}: {ex.Message}");
 				throw CouldNotLoad(strings.error_playmgr_internal_error);
 			}
 		}
@@ -128,6 +132,7 @@ namespace TS3AudioBot.ResourceFactories
 				if (resolver is null)
 					throw CouldNotLoad(string.Format(strings.error_resfac_no_registered_factory, audioType));
 
+				StepLog.Write($"Resolving link with {resolver.ResolverFor}");
 				return await resolver.GetResource(ctx, netlinkurl);
 			}
 
@@ -135,17 +140,20 @@ namespace TS3AudioBot.ResourceFactories
 			List<(string, AudioBotException)>? errors = null;
 			foreach (var resolver in resolvers)
 			{
+				StepLog.Write($"Trying resolver {resolver.ResolverFor} for link");
+				var sw = Stopwatch.StartNew();
 				try
 				{
-					var sw = Stopwatch.StartNew();
 					var result = await resolver.GetResource(ctx, netlinkurl);
 					Log.Debug("Took {0}ms to resolve resource.", sw.ElapsedMilliseconds);
+					StepLog.Write($"Resolved '{result.AudioResource.ResourceTitle ?? result.AudioResource.ResourceId}' with {resolver.ResolverFor} in {sw.ElapsedMilliseconds}ms");
 					return result;
 				}
 				catch (AudioBotException ex)
 				{
 					(errors ??= new List<(string, AudioBotException)>()).Add((resolver.ResolverFor, ex));
 					Log.Trace("Resolver {0} failed, result: {1}", resolver.ResolverFor, ex.Message);
+					StepLog.Write($"Resolver {resolver.ResolverFor} failed after {sw.ElapsedMilliseconds}ms: {ex.Message}");
 				}
 			}
 
@@ -222,7 +230,21 @@ namespace TS3AudioBot.ResourceFactories
 			var resolver = GetResolverByType<ISearchResolver>(resolverName);
 			if (resolver is null)
 				throw CouldNotLoad(string.Format(strings.error_resfac_no_registered_factory, resolverName));
-			return await resolver.Search(ctx, query);
+			StepLog.Write($"Searching {resolver.ResolverFor} for '{query}'");
+			var sw = Stopwatch.StartNew();
+			try
+			{
+				var result = await resolver.Search(ctx, query);
+				StepLog.Write(result.Count == 0
+					? $"Search returned no results ({sw.ElapsedMilliseconds}ms)"
+					: $"Search found {result.Count} results in {sw.ElapsedMilliseconds}ms, first: '{result[0].ResourceTitle ?? result[0].ResourceId}'");
+				return result;
+			}
+			catch (AudioBotException ex)
+			{
+				StepLog.Write($"Search failed after {sw.ElapsedMilliseconds}ms: {ex.Message}");
+				throw;
+			}
 		}
 
 		public void AddResolver(IResolver resolver)

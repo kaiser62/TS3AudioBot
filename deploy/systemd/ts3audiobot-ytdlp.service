@@ -1,0 +1,7 @@
+[Unit]
+Description=yt-dlp auto-update for TS3AudioBot
+
+[Service]
+Type=oneshot
+User=ts3audiobot
+ExecStart=/opt/ts3audiobot/update-ytdlp.sh

@@ -72,8 +72,13 @@ namespace TS3AudioBot.ResourceFactories.Youtube
 			switch (priority)
 			{
 			case LoaderPriority.Internal:
+				StepLog.Write("YouTube: trying internal resolver");
 				try { return await ResolveResourceInternal(resource); }
-				catch (AudioBotException) { goto case LoaderPriority.YoutubeDl; }
+				catch (AudioBotException ex)
+				{
+					StepLog.Write($"YouTube: internal resolver failed ({ex.Message}), falling back to yt-dlp");
+					goto case LoaderPriority.YoutubeDl;
+				}
 
 			case LoaderPriority.YoutubeDl:
 				return await YoutubeDlWrapped(resource);
@@ -355,7 +360,11 @@ namespace TS3AudioBot.ResourceFactories.Youtube
 			var url = format?.url;
 
 			if (string.IsNullOrEmpty(url))
+			{
+				StepLog.Write($"yt-dlp returned {response.formats?.Length ?? 0} formats but none with usable audio");
 				throw Error.LocalStr(strings.error_ytdl_empty_response);
+			}
+			StepLog.Write($"Picked format {format!.format_id} ({format.ext}, audio {format.acodec ?? "?"} {format.abr?.ToString("0") ?? "?"}kbps{(format.vcodec != null && format.vcodec != "none" ? ", with video " + format.vcodec : "")}) from {response.formats?.Length ?? 0} formats");
 
 			Log.Debug("youtube-dl succeeded!");
 			return new PlayResource(url, resource, songInfo: songInfo);

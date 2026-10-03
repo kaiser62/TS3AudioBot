@@ -191,10 +191,12 @@ namespace TS3AudioBot.Audio
 			}
 
 			Log.Debug("AudioResource start: {0}", play);
+			StepLog.Write($"Starting audio stream for '{play.AudioResource.ResourceTitle ?? play.AudioResource.ResourceId}'");
 			try { await playerConnection.Play(play); }
 			catch (AudioBotException ex)
 			{
 				Log.Error("Error return from player: {0}", ex.Message);
+				StepLog.Write($"Player failed to start: {ex.Message}");
 				throw Error.Exception(ex).LocalStr(strings.error_playmgr_internal_error);
 			}
 
@@ -215,6 +217,7 @@ namespace TS3AudioBot.Audio
 			catch (AudioBotException ex)
 			{
 				Log.Warn("Skipping: {0} because {1}", pli, ex.Message);
+				StepLog.Write($"Skipping '{pli.AudioResource.ResourceTitle ?? pli.AudioResource.ResourceId}': {ex.Message}");
 				await Next(invoker, manually);
 			}
 		}
@@ -231,7 +234,11 @@ namespace TS3AudioBot.Audio
 					await StartResource(invoker, pli);
 					return;
 				}
-				catch (AudioBotException ex) { Log.Warn("Skipping: {0} because {1}", pli, ex.Message); }
+				catch (AudioBotException ex)
+				{
+					Log.Warn("Skipping: {0} because {1}", pli, ex.Message);
+					StepLog.Write($"Skipping '{pli.AudioResource.ResourceTitle ?? pli.AudioResource.ResourceId}': {ex.Message}");
+				}
 			}
 			if (pli is null)
 				throw Error.LocalStr(strings.info_playmgr_no_next_song);
@@ -251,7 +258,11 @@ namespace TS3AudioBot.Audio
 					await StartResource(invoker, pli);
 					return;
 				}
-				catch (AudioBotException ex) { Log.Warn("Skipping: {0} because {1}", pli, ex.Message); }
+				catch (AudioBotException ex)
+				{
+					Log.Warn("Skipping: {0} because {1}", pli, ex.Message);
+					StepLog.Write($"Skipping '{pli.AudioResource.ResourceTitle ?? pli.AudioResource.ResourceId}': {ex.Message}");
+				}
 			}
 			if (pli is null)
 				throw Error.LocalStr(strings.info_playmgr_no_previous_song);
@@ -274,7 +285,11 @@ namespace TS3AudioBot.Audio
 					await Next(CurrentPlayData?.Invoker ?? InvokerData.Anonymous, false);
 					return;
 				}
-				catch (AudioBotException ex) { Log.Info("Song queue ended: {0}", ex.Message); }
+				catch (AudioBotException ex)
+				{
+					Log.Info("Song queue ended: {0}", ex.Message);
+					StepLog.Write($"Queue ended: {ex.Message}");
+				}
 			}
 			else
 			{

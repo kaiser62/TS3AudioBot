@@ -1,0 +1,15 @@
+[Unit]
+Description=TS3AudioBot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ts3audiobot
+ExecStart=/opt/ts3audiobot/TS3AudioBot
+Environment=PATH=%h/.deno/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

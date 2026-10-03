@@ -8,6 +8,7 @@
 // program. If not, see <https://opensource.org/licenses/OSL-3.0>.
 
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -38,6 +39,17 @@ namespace TS3AudioBot.Audio
 
 		public event EventHandler? OnSongEnd;
 		public event EventHandler<SongInfoChanged>? OnSongUpdated;
+
+		/// <summary>Receives human readable step log lines (start, exit, errors, reconnects).</summary>
+		public Action<string>? StepSink { get; set; }
+
+		private void Step(string message)
+		{
+			try { StepSink?.Invoke(message); }
+			catch (Exception ex) { Log.Debug(ex, "Step log sink failed"); }
+		}
+
+		private static string FormatTime(TimeSpan? time) => time is null ? "?" : time.Value.ToString(@"h\:mm\:ss");
 
 		private readonly DedicatedTaskScheduler scheduler;
 		private FfmpegInstance? ffmpegInstance;
@@ -105,6 +117,7 @@ namespace TS3AudioBot.Audio
 				if (instance.FfmpegProcess.HasExitedSafe())
 				{
 					Log.Trace("Ffmpeg has exited");
+					ReportExit(instance);
 					AudioStop();
 					triggerEndSafe = true;
 				}
@@ -134,6 +147,7 @@ namespace TS3AudioBot.Audio
 					if (actualStopPosition + retryOnDropBeforeEnd < expectedStopLength)
 					{
 						Log.Debug("Connection to song lost, retrying at {0}", actualStopPosition);
+						Step($"ffmpeg: stream dropped at {FormatTime(actualStopPosition)} of {FormatTime(expectedStopLength)}{instance.ErrorTail()}, reconnecting");
 						instance.HasTriedToReconnect = true;
 						var newInstance = SetPosition(actualStopPosition);
 						if (newInstance.Ok)
@@ -144,12 +158,24 @@ namespace TS3AudioBot.Audio
 						else
 						{
 							Log.Debug("Retry failed {0}", newInstance.Error);
+							Step($"ffmpeg: reconnect failed: {newInstance.Error}");
 							return (false, true);
 						}
 					}
 				}
 			}
 			return (false, false);
+		}
+
+		private void ReportExit(FfmpegInstance instance)
+		{
+			int? exitCode = null;
+			try { exitCode = instance.FfmpegProcess.ExitCode; } catch { }
+			var where = $"at {FormatTime(instance.AudioTimer.SongPosition)} of {FormatTime(instance.ParsedSongLength)}";
+			if (exitCode == 0)
+				Step($"ffmpeg: finished {where}");
+			else
+				Step($"ffmpeg: exited with code {exitCode?.ToString() ?? "?"} {where}{instance.ErrorTail()}");
 		}
 
 		private (bool ret, bool trigger) OnReadEmptyIcy(FfmpegInstance instance)
@@ -159,6 +185,7 @@ namespace TS3AudioBot.Audio
 			if (instance.FfmpegProcess.HasExitedSafe() && !instance.HasTriedToReconnect)
 			{
 				Log.Debug("Connection to stream lost, retrying...");
+				Step($"ffmpeg: radio stream dropped{instance.ErrorTail()}, reconnecting");
 				instance.HasTriedToReconnect = true;
 				var newInstance = StartFfmpegProcessIcy(instance.ReconnectUrl).Result;
 				if (newInstance.Ok)
@@ -169,6 +196,7 @@ namespace TS3AudioBot.Audio
 				else
 				{
 					Log.Debug("Retry failed {0}", newInstance.Error);
+					Step($"ffmpeg: radio reconnect failed: {newInstance.Error}");
 					return (false, true);
 				}
 			}
@@ -280,6 +308,8 @@ namespace TS3AudioBot.Audio
 				instance.FfmpegProcess.ErrorDataReceived += instance.FfmpegProcess_ErrorDataReceived;
 				instance.FfmpegProcess.Start();
 				instance.FfmpegProcess.BeginErrorReadLine();
+				var offset = instance.AudioTimer.SongPositionOffset;
+				Step($"ffmpeg: started (pid {instance.FfmpegProcess.Id}){(offset > TimeSpan.Zero ? " at " + FormatTime(offset) : "")}");
 
 				instance.AudioTimer.Start();
 
@@ -294,6 +324,7 @@ namespace TS3AudioBot.Audio
 					? $"Ffmpeg could not be found ({ex.Message})"
 					: $"Unable to create stream ({ex.Message})";
 				Log.Error(ex, error);
+				Step($"ffmpeg: {error}");
 				instance.Close();
 				StopFfmpegProcess();
 				return error;
@@ -339,6 +370,21 @@ namespace TS3AudioBot.Audio
 
 			public Action<SongInfoChanged>? OnMetaUpdated;
 
+			private const int ErrorTailLines = 4;
+			private static readonly Regex UrlMatch = new Regex(@"https?://\S+", Util.DefaultRegexConfig);
+			private readonly Queue<string> lastErrorLines = new Queue<string>();
+
+			/// <summary>The last few stderr lines of ffmpeg, formatted for the step log.</summary>
+			public string ErrorTail()
+			{
+				lock (lastErrorLines)
+				{
+					if (lastErrorLines.Count == 0)
+						return "";
+					return " | ffmpeg said: " + string.Join(" / ", lastErrorLines);
+				}
+			}
+
 			public FfmpegInstance(string url, PreciseAudioTimer timer) : this(url, timer, null!, 0) { }
 			public FfmpegInstance(string url, PreciseAudioTimer timer, Stream icyStream, int icyMetaInt)
 			{
@@ -376,6 +422,18 @@ namespace TS3AudioBot.Audio
 
 				if (sender != FfmpegProcess)
 					throw new InvalidOperationException("Wrong process associated to event");
+
+				// Keep the last stderr lines (without progress noise and signed urls) for error reports
+				var line = UrlMatch.Replace(e.Data.Trim(), "<url>");
+				if (line.Length > 0 && !line.StartsWith("size=", StringComparison.Ordinal))
+				{
+					lock (lastErrorLines)
+					{
+						lastErrorLines.Enqueue(line.Length > 200 ? line.Substring(0, 200) : line);
+						while (lastErrorLines.Count > ErrorTailLines)
+							lastErrorLines.Dequeue();
+					}
+				}
 
 				if (ParsedSongLength is null)
 				{
