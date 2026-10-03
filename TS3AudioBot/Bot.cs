@@ -128,8 +128,30 @@ namespace TS3AudioBot
 
 			idleTickWorker = Scheduler.Invoke(() => Scheduler.CreateTimer(OnIdle, TimeSpan.MaxValue, false)).Result;
 
-			player.OnSongEnd += playManager.SongStoppedEvent;
+			// Song end triggers auto-next, which resolves the next song; keep the step log for it
+			player.OnSongEnd += async (s, e) =>
+			{
+				using (StepLog.Begin(ChannelLog))
+					await playManager.SongStoppedEvent(s, e);
+			};
 			player.OnSongUpdated += (s, e) => playManager.Update(e);
+			player.FfmpegProducer.StepSink = ChannelLog;
+			// Channel step log: playback state changes
+			playManager.AfterResourceStarted += (s, e) =>
+			{
+				ChannelLog($"Now playing: {e.ResourceData.ResourceTitle ?? e.ResourceData.ResourceId} ({e.ResourceData.AudioType})");
+				return Task.CompletedTask;
+			};
+			playManager.ResourceStopped += (s, e) =>
+			{
+				ChannelLog(e.SongEndedByCallback ? "Song ended (stream finished)" : "Song stopped");
+				return Task.CompletedTask;
+			};
+			playManager.PlaybackStopped += (s, e) =>
+			{
+				ChannelLog("Playback stopped, nothing left to play");
+				return Task.CompletedTask;
+			};
 			// Update idle status events
 			playManager.BeforeResourceStarted += (s, e) => { DisableIdleTickWorker(); return Task.CompletedTask; };
 			playManager.PlaybackStopped += (s, e) => { EnableIdleTickWorker(); return Task.CompletedTask; };
@@ -314,6 +336,9 @@ namespace TS3AudioBot
 				serverGroups: serverGroups,
 				channelGroup: channelGroup);
 
+			using var stepLog = StepLog.Begin(ChannelLog);
+			ChannelLog($"Request from {textMessage.InvokerName}: {textMessage.Message}");
+
 			var session = sessionManager.GetOrCreateSession(textMessage.InvokerId);
 			var info = CreateExecInfo(invoker, session);
 
@@ -483,6 +508,29 @@ namespace TS3AudioBot
 
 		#endregion
 
+		#region Channel step log
+
+		private const int ChannelLogMaxLength = 900;
+
+		/// <summary>Posts a step log line to the bot's current channel if 'channel_log' is enabled.</summary>
+		private void ChannelLog(string message)
+		{
+			if (isClosed || !config.ChannelLog.Value)
+				return;
+
+			Log.Info("[channel_log] {0}", message);
+			if (message.Length > ChannelLogMaxLength)
+				message = message.Substring(0, ChannelLogMaxLength) + "...";
+			var text = "» " + message;
+			_ = Scheduler.InvokeAsync(async () =>
+			{
+				try { await ts3client.SendChannelMessage(text); }
+				catch (Exception ex) { Log.Debug(ex, "Failed to send channel log message"); }
+			});
+		}
+
+		#endregion
+
 		#region Script Execution
 
 		private async Task CallScript(ExecutionInformation info, string command, bool answer, bool skipRights)
@@ -533,6 +581,7 @@ namespace TS3AudioBot
 			{
 				NLog.LogLevel commandErrorLevel = answer ? NLog.LogLevel.Debug : NLog.LogLevel.Warn;
 				Log.Log(commandErrorLevel, ex, "Command Error ({0})", ex.Message);
+				StepLog.Write($"Command failed: {ex.Message}");
 				if (answer)
 				{
 					await info.Write(TextMod.Format(config.Commands.Color, strings.error_call_error.Mod().Color(Color.Red).Bold(), ex.Message))
@@ -542,6 +591,7 @@ namespace TS3AudioBot
 			catch (Exception ex)
 			{
 				Log.Error(ex, "Unexpected command error: {0}", ex.Message);
+				StepLog.Write($"Command crashed: {ex.GetType().Name}: {ex.Message}");
 				if (answer)
 				{
 					await info.Write(TextMod.Format(config.Commands.Color, strings.error_call_unexpected_error.Mod().Color(Color.Red).Bold(), ex.Message))

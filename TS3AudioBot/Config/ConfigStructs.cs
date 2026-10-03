@@ -146,6 +146,9 @@ namespace TS3AudioBot.Config
 		public ConfigValue<bool> Run { get; } = new ConfigValue<bool>("run", false,
 			"Starts the instance when the TS3AudioBot is launched.");
 
+		public ConfigValue<bool> ChannelLog { get; } = new ConfigValue<bool>("channel_log", false,
+			"Posts a detailed log of every step (search, resolve, yt-dlp, ffmpeg, errors) into the bot's channel chat.");
+
 		public ConfCommands Commands { get; } = Create<ConfCommands>("commands");
 		public ConfConnect Connect { get; } = Create<ConfConnect>("connect");
 		public ConfReconnect Reconnect { get; } = Create<ConfReconnect>("reconnect");
