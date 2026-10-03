@@ -357,6 +357,32 @@ namespace TS3AudioBot.ResourceFactories.Youtube
 			resource.ResourceTitle = response.AutoTitle ?? $"Youtube-{resource.ResourceId}";
 			var songInfo = YoutubeDlHelper.MapToSongInfo(response);
 			var format = YoutubeDlHelper.FilterBest(response.formats);
+
+			// YouTube sometimes answers with a reduced format list (only muxed video like format 18).
+			// One retry usually gets the full list with audio-only streams.
+			if (format != null && !YoutubeDlHelper.IsAudioOnly(format))
+			{
+				StepLog.Write($"yt-dlp returned only {response.formats?.Length ?? 0} formats without an audio-only stream, retrying once");
+				try
+				{
+					var retry = await YoutubeDlHelper.GetSingleVideo(resource.ResourceId);
+					var retryFormat = YoutubeDlHelper.FilterBest(retry.formats);
+					if (retryFormat != null && YoutubeDlHelper.IsAudioOnly(retryFormat))
+					{
+						response = retry;
+						format = retryFormat;
+					}
+					else
+					{
+						StepLog.Write("Retry also had no audio-only stream, using the muxed format");
+					}
+				}
+				catch (AudioBotException ex)
+				{
+					StepLog.Write($"Retry failed ({ex.Message}), using the muxed format");
+				}
+			}
+
 			var url = format?.url;
 
 			if (string.IsNullOrEmpty(url))
