@@ -16,4 +16,3 @@
 *.rtf	 diff=astextplain
 *.RTF	 diff=astextplain
 deploy/** text eol=lf
-deploy/** text eol=lf
