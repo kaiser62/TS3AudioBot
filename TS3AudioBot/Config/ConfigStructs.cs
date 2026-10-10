@@ -121,6 +121,9 @@ namespace TS3AudioBot.Config
 		public ConfigValue<int> CommandComplexity { get; } = new ConfigValue<int>("command_complexity", 64,
 			"Limits the maximum command complexity to prevent endless loops.");
 		public ConfigValue<string> Matcher { get; } = new ConfigValue<string>("matcher", "exact", "See: bot.commands.matcher");
+		public ConfigValue<bool> AllowAnonymousRemote { get; } = new ConfigValue<bool>("allow_anonymous_remote", true,
+			"Allows api requests without a token from other machines. Set to false when the api is reachable from the internet;\n" +
+			"anonymous requests from this machine itself are still allowed.");
 	}
 
 	public class ConfWebInterface : ConfigTable

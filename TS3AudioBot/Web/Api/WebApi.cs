@@ -72,13 +72,6 @@ namespace TS3AudioBot.Web.Api
 				await ReturnError(new CommandException(authResult.Error, CommandExceptionReason.Unauthorized), response);
 				return;
 			}
-			if (!AllowAnonymousRequest && authResult.Value.ClientUid == Uid.Null)
-			{
-				Log.Debug("Unauthorized request!");
-				await ReturnError(new CommandException(ErrorAnonymousDisabled, CommandExceptionReason.Unauthorized), response);
-				return;
-			}
-
 			var apiCallData = authResult.Value;
 			var remoteAddress = context.Connection?.RemoteIpAddress;
 			if (remoteAddress is null)
@@ -87,11 +80,28 @@ namespace TS3AudioBot.Web.Api
 				return;
 			}
 
-			if (IPAddress.IsLoopback(remoteAddress)
-				&& request.Headers.TryGetValue("X-Real-IP", out var realIpStr)
-				&& IPAddress.TryParse(realIpStr, out var realIp))
+			if (IPAddress.IsLoopback(remoteAddress))
 			{
-				remoteAddress = realIp;
+				// Behind a local reverse proxy. A cloudflared tunnel always sets CF-Connecting-IP and
+				// Cloudflare overwrites any client-sent value, so it takes priority over X-Real-IP,
+				// which a client can send through the tunnel unchanged.
+				if (request.Headers.TryGetValue("CF-Connecting-IP", out var cfIpStr))
+				{
+					remoteAddress = IPAddress.TryParse(cfIpStr, out var cfIp) ? cfIp : IPAddress.None;
+				}
+				else if (request.Headers.TryGetValue("X-Real-IP", out var realIpStr)
+					&& IPAddress.TryParse(realIpStr, out var realIp))
+				{
+					remoteAddress = realIp;
+				}
+			}
+
+			var isAnonymous = apiCallData.ClientUid == Uid.Anonymous || apiCallData.ClientUid == Uid.Null;
+			if (isAnonymous && (!AllowAnonymousRequest || (!config.AllowAnonymousRemote && !IPAddress.IsLoopback(remoteAddress))))
+			{
+				Log.Debug("Unauthorized anonymous request from {0}", remoteAddress);
+				await ReturnError(new CommandException(ErrorAnonymousDisabled, CommandExceptionReason.Unauthorized), response);
+				return;
 			}
 			apiCallData.IpAddress = remoteAddress;
 			apiCallData.RequestUrl = new Uri(Dummy, context.Features.Get<IHttpRequestFeature>().RawTarget);
