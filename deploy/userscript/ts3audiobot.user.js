@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TS3AudioBot Sender
 // @namespace    https://github.com/kaiser62/TS3AudioBot
-// @version      1.1.0
+// @version      1.1.1
 // @description  Send YouTube videos to a TS3AudioBot (play now or add to queue).
 // @author       kaiser62
 // @match        https://www.youtube.com/*
@@ -378,10 +378,12 @@
 	new MutationObserver(() => {
 		if (pending) return;
 		pending = true;
-		requestAnimationFrame(() => { pending = false; ensureBar(); decorateLists(); });
+		// setTimeout, not rAF: rAF is paused in hidden tabs, which would stall the observer
+		setTimeout(() => { pending = false; ensureBar(); decorateLists(); }, 150);
 	}).observe(document.body, { childList: true, subtree: true });
 	setInterval(refreshNowPlaying, 30000);
 	ensureBar();
+	decorateLists();
 
 	if (!cfg.uid || !cfg.token) setTimeout(() => toast("Open the Tampermonkey menu > TS3AudioBot Sender > Settings to connect.", false), 2000);
 })();
