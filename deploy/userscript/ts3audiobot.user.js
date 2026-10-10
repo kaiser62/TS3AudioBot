@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TS3AudioBot Sender
 // @namespace    https://github.com/kaiser62/TS3AudioBot
-// @version      1.1.1
+// @version      1.1.2
 // @description  Send YouTube videos to a TS3AudioBot (play now or add to queue).
 // @author       kaiser62
 // @match        https://www.youtube.com/*
@@ -285,8 +285,10 @@
 			if (!cb) {
 				cb = h("input", { type: "checkbox", class: "tsab-cb", title: "Select for TS queue (Shift+click for a range)" });
 				// stop YouTube from treating the click as "open this video"
-				for (const ev of ["click", "mousedown", "mouseup"]) cb.addEventListener(ev, (e) => e.stopPropagation(), true);
+				// (stopping it in a separate capture listener would also skip our own click handler below)
+				for (const ev of ["mousedown", "mouseup"]) cb.addEventListener(ev, (e) => e.stopPropagation());
 				cb.addEventListener("click", (e) => {
+					e.stopPropagation();
 					const all = visibleItems();
 					if (e.shiftKey && lastClicked && all.includes(lastClicked)) {
 						const [a, b] = [all.indexOf(lastClicked), all.indexOf(el)].sort((x, y) => x - y);
