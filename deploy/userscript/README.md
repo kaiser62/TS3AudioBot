@@ -5,6 +5,7 @@ Adds buttons to YouTube that send the video to one of the TeamSpeak music bots.
 - **▶ Play on TS** / **+ Queue** under the video title, a bot picker, and what the bot is playing now
 - ▶ / + quick buttons when hovering a thumbnail (can be turned off in settings)
 - `Alt+P` play current video, `Alt+Q` queue it
+- Checkboxes on Mix / playlist entries (side panel and playlist pages): tick songs, Shift+click for a range, then **+ Queue N** in the bar at the bottom left. Songs are added in playlist order; the button turns into **Stop** while it runs, and songs that fail stay ticked
 - Works on youtube.com (incl. Shorts), m.youtube.com and music.youtube.com
 
 ## Install

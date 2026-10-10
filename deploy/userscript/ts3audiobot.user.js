@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TS3AudioBot Sender
 // @namespace    https://github.com/kaiser62/TS3AudioBot
-// @version      1.0.0
+// @version      1.1.2
 // @description  Send YouTube videos to a TS3AudioBot (play now or add to queue).
 // @author       kaiser62
 // @match        https://www.youtube.com/*
@@ -60,6 +60,9 @@
 .tsab-hover{position:absolute;z-index:999998;display:flex;gap:4px}
 .tsab-hover button{border:0;border-radius:6px;width:30px;height:30px;cursor:pointer;background:rgba(0,0,0,.8);color:#fff;font-size:15px}
 .tsab-hover button:hover{background:#2580c3}
+.tsab-cb{width:18px;height:18px;margin:0 6px 0 2px;flex:none;align-self:center;cursor:pointer;accent-color:#2580c3}
+.tsab-multi{position:fixed;left:16px;bottom:16px;z-index:999997;display:flex;gap:8px;align-items:center;padding:8px 10px;border-radius:12px;
+  background:var(--yt-spec-base-background,#fff);box-shadow:0 4px 18px rgba(0,0,0,.35);font:500 14px Roboto,Arial,sans-serif;color:var(--yt-spec-text-primary,#0f0f0f)}
 .tsab-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000000;display:flex;align-items:center;justify-content:center}
 .tsab-modal{background:#fff;color:#0f0f0f;border-radius:12px;padding:20px;width:min(440px,92vw);font:14px Roboto,Arial,sans-serif}
 .tsab-modal h2{margin:0 0 12px;font-size:18px}
@@ -257,6 +260,109 @@
 	}, true);
 	window.addEventListener("scroll", hideHover, { passive: true });
 
+	// ---------- multi-select on playlists / mixes ----------
+	const LIST_ITEMS = "ytd-playlist-panel-video-renderer, ytd-playlist-video-renderer";
+	const selected = new Map(); // videoId -> title
+	let lastClicked = null, multiBar, multiCount, queueBtn, queueing = null;
+
+	const itemId = (el) => {
+		const a = el.querySelector("a#wc-endpoint, a#video-title, a#thumbnail, a[href*='/watch?v=']");
+		return a ? videoIdFrom(a.href) : null;
+	};
+	const itemTitle = (el) => (el.querySelector("#video-title")?.textContent || "").trim();
+	const visibleItems = () => [...document.querySelectorAll(LIST_ITEMS)].filter((el) => el.isConnected && itemId(el));
+
+	function toggle(el, on) {
+		const id = itemId(el);
+		if (!id) return;
+		if (on) selected.set(id, itemTitle(el)); else selected.delete(id);
+	}
+
+	function decorateLists() {
+		const items = visibleItems();
+		for (const el of items) {
+			let cb = el.querySelector(":scope .tsab-cb");
+			if (!cb) {
+				cb = h("input", { type: "checkbox", class: "tsab-cb", title: "Select for TS queue (Shift+click for a range)" });
+				// stop YouTube from treating the click as "open this video"
+				// (stopping it in a separate capture listener would also skip our own click handler below)
+				for (const ev of ["mousedown", "mouseup"]) cb.addEventListener(ev, (e) => e.stopPropagation());
+				cb.addEventListener("click", (e) => {
+					e.stopPropagation();
+					const all = visibleItems();
+					if (e.shiftKey && lastClicked && all.includes(lastClicked)) {
+						const [a, b] = [all.indexOf(lastClicked), all.indexOf(el)].sort((x, y) => x - y);
+						all.slice(a, b + 1).forEach((it) => toggle(it, cb.checked));
+					} else {
+						toggle(el, cb.checked);
+					}
+					lastClicked = el;
+					decorateLists();
+				});
+				const spot = el.querySelector("#index-container") || el.querySelector("#container, #content") || el.firstElementChild;
+				(spot && spot.parentElement ? spot.parentElement : el).insertBefore(cb, spot && spot.parentElement ? spot : el.firstChild);
+			}
+			// YouTube recycles these elements for other videos, so always resync
+			cb.checked = selected.has(itemId(el));
+		}
+		updateMultiBar(items.length);
+	}
+
+	function updateMultiBar(itemCount) {
+		if (!itemCount && !selected.size && !queueing) { if (multiBar) multiBar.remove(); multiBar = null; return; }
+		if (!multiBar || !multiBar.isConnected) {
+			multiCount = h("span");
+			queueBtn = h("button", { class: "tsab-btn primary", onclick: queueSelected });
+			multiBar = h("div", { class: "tsab-multi" },
+				h("span", { textContent: "TS:" }),
+				multiCount,
+				h("button", { class: "tsab-btn", textContent: "Select all", onclick: () => { visibleItems().forEach((el) => toggle(el, true)); decorateLists(); } }),
+				h("button", { class: "tsab-btn", textContent: "Clear", onclick: () => { selected.clear(); decorateLists(); } }),
+				queueBtn);
+			document.body.append(multiBar);
+		}
+		// only touch the DOM on real changes: every write re-triggers the MutationObserver
+		const setText = (el, t) => { if (el.textContent !== t) el.textContent = t; };
+		setText(multiCount, `${selected.size} selected`);
+		if (queueing) {
+			setText(queueBtn, `Stop (${queueing.done}/${queueing.total})`);
+			queueBtn.disabled = false;
+		} else {
+			setText(queueBtn, `+ Queue ${selected.size} on ${botName(cfg.botId)}`);
+			queueBtn.disabled = selected.size === 0;
+		}
+	}
+
+	async function queueSelected() {
+		if (queueing) { queueing.stop = true; return; } // button doubles as Stop
+		// playlist order first, then anything selected that has scrolled out of the DOM
+		const inDom = visibleItems().map(itemId).filter((id) => selected.has(id));
+		const order = [...new Set([...inDom, ...selected.keys()])];
+		const botId = cfg.botId;
+		queueing = { total: order.length, done: 0, failed: [], stop: false };
+		updateMultiBar(1);
+		if (!bots.length) await loadBots().catch(() => {});
+		for (const id of order) {
+			if (queueing.stop) break;
+			toast(`Queueing ${queueing.done + 1}/${queueing.total} on ${botName(botId)}: ${selected.get(id) || id}`);
+			try {
+				await api(onBot(botId, "add", `https://youtu.be/${id}`));
+				selected.delete(id);
+			} catch (e) {
+				queueing.failed.push(`${selected.get(id) || id}: ${e.message}`);
+			}
+			queueing.done++;
+			decorateLists();
+		}
+		const q = queueing;
+		queueing = null;
+		const ok = q.done - q.failed.length;
+		toast(`Queued ${ok}/${q.total} on ${botName(botId)}${q.stop ? " (stopped)" : ""}` +
+			(q.failed.length ? `. Failed (still selected): ${q.failed.join(" | ")}` : ""), q.failed.length > 0);
+		decorateLists();
+		refreshNowPlaying();
+	}
+
 	// ---------- hotkeys ----------
 	document.addEventListener("keydown", (e) => {
 		if (!e.altKey || e.ctrlKey || e.metaKey) return;
@@ -274,10 +380,12 @@
 	new MutationObserver(() => {
 		if (pending) return;
 		pending = true;
-		requestAnimationFrame(() => { pending = false; ensureBar(); });
+		// setTimeout, not rAF: rAF is paused in hidden tabs, which would stall the observer
+		setTimeout(() => { pending = false; ensureBar(); decorateLists(); }, 150);
 	}).observe(document.body, { childList: true, subtree: true });
 	setInterval(refreshNowPlaying, 30000);
 	ensureBar();
+	decorateLists();
 
 	if (!cfg.uid || !cfg.token) setTimeout(() => toast("Open the Tampermonkey menu > TS3AudioBot Sender > Settings to connect.", false), 2000);
 })();
