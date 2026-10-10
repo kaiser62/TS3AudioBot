@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TS3AudioBot Sender
 // @namespace    https://github.com/kaiser62/TS3AudioBot
-// @version      1.1.2
+// @version      1.2.0
 // @description  Send YouTube videos to a TS3AudioBot (play now or add to queue).
 // @author       kaiser62
 // @match        https://www.youtube.com/*
@@ -60,6 +60,7 @@
 .tsab-hover{position:absolute;z-index:999998;display:flex;gap:4px}
 .tsab-hover button{border:0;border-radius:6px;width:30px;height:30px;cursor:pointer;background:rgba(0,0,0,.8);color:#fff;font-size:15px}
 .tsab-hover button:hover{background:#2580c3}
+.tsab-panel-all{margin:6px 0 2px;font-size:12px}
 .tsab-cb{width:18px;height:18px;margin:0 6px 0 2px;flex:none;align-self:center;cursor:pointer;accent-color:#2580c3}
 .tsab-multi{position:fixed;left:16px;bottom:16px;z-index:999997;display:flex;gap:8px;align-items:center;padding:8px 10px;border-radius:12px;
   background:var(--yt-spec-base-background,#fff);box-shadow:0 4px 18px rgba(0,0,0,.35);font:500 14px Roboto,Arial,sans-serif;color:var(--yt-spec-text-primary,#0f0f0f)}
@@ -305,7 +306,33 @@
 			// YouTube recycles these elements for other videos, so always resync
 			cb.checked = selected.has(itemId(el));
 		}
+		decoratePanels();
 		updateMultiBar(items.length);
+	}
+
+	// "Select all" in the Mix / playlist side panel header: ticks every song in that panel
+	function decoratePanels() {
+		for (const panel of document.querySelectorAll("ytd-playlist-panel-renderer")) {
+			const spot = panel.querySelector("#playlist-actions") || panel.querySelector("#header-contents");
+			if (!spot) continue;
+			const songs = [...panel.querySelectorAll("ytd-playlist-panel-video-renderer")].filter((el) => itemId(el));
+			let btn = spot.querySelector(":scope > .tsab-panel-all");
+			if (!btn) {
+				btn = h("button", { class: "tsab-btn tsab-panel-all", onclick: (e) => {
+					e.stopPropagation();
+					const list = [...panel.querySelectorAll("ytd-playlist-panel-video-renderer")].filter((el) => itemId(el));
+					const all = list.length && list.every((el) => selected.has(itemId(el)));
+					list.forEach((el) => toggle(el, !all));
+					decorateLists();
+				} });
+				spot.append(btn);
+			}
+			if (!songs.length) { btn.hidden = true; continue; }
+			btn.hidden = false;
+			const all = songs.every((el) => selected.has(itemId(el)));
+			const t = all ? "Unselect all" : `Select all ${songs.length} for TS`;
+			if (btn.textContent !== t) btn.textContent = t;
+		}
 	}
 
 	function updateMultiBar(itemCount) {
