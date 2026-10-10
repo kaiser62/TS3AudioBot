@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TS3AudioBot Sender
 // @namespace    https://github.com/kaiser62/TS3AudioBot
-// @version      1.2.0
+// @version      1.2.1
 // @description  Send YouTube videos to a TS3AudioBot (play now or add to queue).
 // @author       kaiser62
 // @match        https://www.youtube.com/*
@@ -57,7 +57,7 @@
 .tsab-toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:999999;padding:10px 16px;border-radius:8px;
   font:500 14px Roboto,Arial,sans-serif;color:#fff;background:#323232;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:80vw}
 .tsab-toast.err{background:#b3261e}
-.tsab-hover{position:absolute;z-index:999998;display:flex;gap:4px}
+.tsab-hover{position:fixed;z-index:999998;display:flex;gap:4px}
 .tsab-hover button{border:0;border-radius:6px;width:30px;height:30px;cursor:pointer;background:rgba(0,0,0,.8);color:#fff;font-size:15px}
 .tsab-hover button:hover{background:#2580c3}
 .tsab-panel-all{margin:6px 0 2px;font-size:12px}
@@ -250,16 +250,20 @@
 		const id = videoIdFrom(a.href);
 		if (!id) return;
 		hideHover();
-		const r = a.getBoundingClientRect();
+		// anchor to the thumbnail, not the link: in the Mix panel the link spans the whole row
+		const thumb = a.querySelector("ytd-thumbnail, yt-thumbnail-view-model, yt-image, img") || img;
+		const r = thumb.getBoundingClientRect();
+		if (!r.width || !r.height) return;
 		hoverFor = a;
-		hoverBox = h("div", { class: "tsab-hover", style: { top: `${r.top + window.scrollY + 6}px`, left: `${r.left + window.scrollX + 6}px` } },
+		hoverBox = h("div", { class: "tsab-hover", style: { top: `${r.top + 4}px`, left: `${r.left + 4}px` } },
 			h("button", { textContent: "▶", title: "Play on TS bot", onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); send(id, "play"); } }),
 			h("button", { textContent: "+", title: "Queue on TS bot", onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); send(id, "add"); } }));
 		hoverBox.addEventListener("mouseleave", (ev) => { if (!a.contains(ev.relatedTarget)) hideHover(); });
 		a.addEventListener("mouseleave", (ev) => { if (!hoverBox || !hoverBox.contains(ev.relatedTarget)) hideHover(); }, { once: true });
 		document.body.append(hoverBox);
 	}, true);
-	window.addEventListener("scroll", hideHover, { passive: true });
+	// capture: also catch scrolling inside the Mix panel, which doesn't scroll the window
+	document.addEventListener("scroll", hideHover, { capture: true, passive: true });
 
 	// ---------- multi-select on playlists / mixes ----------
 	const LIST_ITEMS = "ytd-playlist-panel-video-renderer, ytd-playlist-video-renderer";
