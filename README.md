@@ -40,6 +40,15 @@ Branch `feature/ytdlp-errors-formats`, version `0.12.6-ytdlp-errors-formats.*`.
 - `YoutubeResolver`: if yt-dlp returns a reduced list with only muxed formats, it retries once to get the audio-only streams.
 - Tests: `TS3ABotUnitTests/YoutubeDlHelperTests.cs`.
 
+### 1c. Public web API + YouTube userscript — code change
+Branch `feature/web-api-public`, version `0.12.7-web-api-public.*`.
+
+- `Web/Api/WebApi.cs`: behind a loopback proxy the client IP is taken from `CF-Connecting-IP` (set by Cloudflare, cannot be spoofed through the tunnel) before `X-Real-IP`. Upstream trusted `X-Real-IP` from any loopback request, so through a tunnel anyone could claim `127.0.0.1` and match `ip = 127.0.0.1` admin rules.
+- New `[web.api] allow_anonymous_remote` (default `true`, upstream behaviour). Set to `false` to reject token-less requests that don't come from the server itself.
+- Fixed the anonymous check: it compared against `Uid.Null`, but anonymous calls use `Uid.Anonymous`, so it never fired.
+- `deploy/userscript/`: Tampermonkey script that sends YouTube videos to a bot (Play / Queue buttons, bot picker, now playing, thumbnail hover buttons, Alt+P / Alt+Q). Users authenticate with their TeamSpeak UID + `!api token`. See [deploy/userscript/README.md](deploy/userscript/README.md).
+- Server: `music.basic.int.eu.org` → cloudflared tunnel, only `^/api/` is routed to the bot; `rights.toml` grants `cmd.api.token` to everyone so TS users can get a token.
+
 ### 2. yt-dlp via Docker wrapper — deployment (`deploy/youtube-dl`)
 Upstream calls a local `youtube-dl` binary. This fork points `[factories.youtube-dl] path = "./youtube-dl"` at a bash wrapper that runs yt-dlp in the `jeeaaasustest/youtube-dl` image:
 - optional `cookies.txt` next to the wrapper is mounted and passed with `--cookies` (never commit it);
