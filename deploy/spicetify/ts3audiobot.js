@@ -45,63 +45,244 @@
 	const loadBots = async () => (bots = await api("/bot/list"));
 
 	// ---------- Spotify metadata ----------
-	const idOf = (uri) => uri.split(":").pop();
-	const query = (t) => `${t.artists.map((a) => a.name).slice(0, 2).join(", ")} - ${t.name}`;
+	const idOf = (uri) => {
+		if (!uri) return "";
+		if (typeof uri === "string") return uri.split(":").pop().split("?")[0];
+		return uri.id || uri.getBase62Id?.() || String(uri);
+	};
+
+	function query(t) {
+		if (!t) return "";
+		if (typeof t === "string") return t;
+		const name = t.name || t.title || t.metadata?.title || "";
+		let artists = [];
+		if (Array.isArray(t.artists)) {
+			artists = t.artists.map((a) => (typeof a === "string" ? a : a.name || a.profile?.name || "")).filter(Boolean);
+		} else if (Array.isArray(t.artists?.items)) {
+			artists = t.artists.items.map((a) => a.profile?.name || a.name || "").filter(Boolean);
+		} else if (t.metadata?.artist_name) {
+			artists = [t.metadata.artist_name];
+			let i = 1;
+			while (t.metadata[`artist_name:${i}`]) {
+				artists.push(t.metadata[`artist_name:${i}`]);
+				i++;
+			}
+		}
+		const artistStr = artists.slice(0, 2).join(", ");
+		return artistStr && name ? `${artistStr} - ${name}` : (name || artistStr);
+	}
+
+	function getSpotifyToken() {
+		return (
+			Spicetify.Platform?.Session?.accessToken ||
+			Spicetify.Platform?.AuthorizationAPI?.getState?.()?.token?.accessToken ||
+			""
+		);
+	}
 
 	async function webApi(url) {
-		return Spicetify.CosmosAsync.get(url.startsWith("https://") ? url : "https://api.spotify.com/v1/" + url);
+		const fullUrl = url.startsWith("https://") ? url : "https://api.spotify.com/v1/" + url;
+		let res = null;
+		let lastError = null;
+
+		// 1. Try Spicetify.CosmosAsync
+		try {
+			res = await Spicetify.CosmosAsync.get(fullUrl);
+		} catch (e) {
+			lastError = e;
+		}
+
+		// If CosmosAsync succeeded and returned valid data (not an error object)
+		if (res && !res.error && !res.code && !res.message) {
+			return res;
+		}
+
+		// 2. Fallback: direct fetch using user Bearer token
+		const token = getSpotifyToken();
+		if (token) {
+			try {
+				const r = await fetch(fullUrl, { headers: { Authorization: "Bearer " + token } });
+				if (r.ok) return await r.json();
+				const errJson = await r.json().catch(() => null);
+				lastError = new Error((errJson?.error?.message) || `HTTP ${r.status}`);
+			} catch (e) {
+				lastError = e;
+			}
+		}
+
+		if (res && res.error) throw new Error(res.error.message || `Spotify API error (${res.error.status || res.code})`);
+		if (res && res.message) throw new Error(res.message);
+		if (lastError) throw lastError;
+		throw new Error("Cannot read data from Spotify API.");
+	}
+
+	function getUriType(u) {
+		if (typeof u === "string") {
+			const parts = u.split(":");
+			if (parts.length >= 2 && parts[0] === "spotify") return parts[1].toLowerCase();
+		}
+		const parsed = Spicetify.URI?.from?.(u) || (typeof u === "string" ? Spicetify.URI?.fromString?.(u) : null);
+		return String(parsed?.type || parsed?.Type || "").toLowerCase();
 	}
 
 	// Resolves track / album / playlist URIs to "artist - title" search strings, in order.
 	async function resolveQueries(uris) {
 		const out = [];
 		const trackIds = [];
+
 		const flushTracks = async () => {
+			if (!trackIds.length) return;
+
+			// If only 1 track (very common: user right-clicked a single song)
+			if (trackIds.length === 1) {
+				const id = trackIds[0];
+				// Check if currently playing track matches
+				const cur = Spicetify.Player.data?.item;
+				if (cur && (idOf(cur.uri) === id || cur.id === id)) {
+					const q = query(cur);
+					if (q) { out.push(q); trackIds.length = 0; return; }
+				}
+				// Try single track endpoint /v1/tracks/{id}
+				try {
+					const t = await webApi("tracks/" + id);
+					if (t) {
+						const q = query(t);
+						if (q) out.push(q);
+						trackIds.length = 0;
+						return;
+					}
+				} catch (_) {}
+				// Try batch endpoint /v1/tracks?ids={id}
+				try {
+					const res = await webApi("tracks?ids=" + id);
+					for (const t of res.tracks || []) if (t) out.push(query(t));
+				} catch (_) {}
+				trackIds.length = 0;
+				return;
+			}
+
+			// Multiple tracks: batch by 50
 			for (let i = 0; i < trackIds.length; i += 50) {
-				const res = await webApi("tracks?ids=" + trackIds.slice(i, i + 50).join(","));
-				for (const t of res.tracks || []) if (t) out.push(query(t));
+				const batch = trackIds.slice(i, i + 50);
+				let gotBatch = false;
+				try {
+					const res = await webApi("tracks?ids=" + batch.join(","));
+					if (res && Array.isArray(res.tracks)) {
+						for (const t of res.tracks) if (t) out.push(query(t));
+						gotBatch = true;
+					}
+				} catch (_) {}
+
+				if (!gotBatch) {
+					// Fallback: one by one
+					for (const id of batch) {
+						try {
+							const t = await webApi("tracks/" + id);
+							if (t) out.push(query(t));
+						} catch (_) {}
+					}
+				}
 			}
 			trackIds.length = 0;
 		};
+
 		for (const uri of uris) {
-			const type = Spicetify.URI.fromString(uri).type;
-			if (type === Spicetify.URI.Type.TRACK) { trackIds.push(idOf(uri)); continue; }
+			const type = getUriType(uri);
+			if (type === "track") {
+				trackIds.push(idOf(uri));
+				continue;
+			}
 			await flushTracks();
-			if (type === Spicetify.URI.Type.ALBUM) {
-				for (let url = `albums/${idOf(uri)}/tracks?limit=50`; url; ) {
-					const res = await webApi(url);
-					for (const t of res.items || []) out.push(query(t));
-					url = res.next;
+
+			if (type === "album") {
+				let handled = false;
+				// Try GraphQL queryAlbumTracks (native internal)
+				if (Spicetify.GraphQL?.Definitions?.queryAlbumTracks && Spicetify.GraphQL?.Request) {
+					try {
+						const rawUri = typeof uri === "string" && uri.startsWith("spotify:") ? uri : `spotify:album:${idOf(uri)}`;
+						const gRes = await Spicetify.GraphQL.Request(Spicetify.GraphQL.Definitions.queryAlbumTracks, {
+							uri: rawUri,
+							offset: 0,
+							limit: 100,
+						});
+						const items = (gRes?.data?.albumUnion?.tracksV2 ?? gRes?.data?.albumUnion?.tracks ?? []).items;
+						if (items && items.length) {
+							for (const it of items) {
+								const t = it.track || it;
+								const q = query(t);
+								if (q) out.push(q);
+							}
+							handled = true;
+						}
+					} catch (_) {}
 				}
-			} else if (type === Spicetify.URI.Type.PLAYLIST || type === Spicetify.URI.Type.PLAYLIST_V2) {
-				for (let url = `playlists/${idOf(uri)}/tracks?limit=100&fields=next,items(track(name,type,artists(name)))`; url; ) {
-					const res = await webApi(url);
-					for (const it of res.items || []) if (it.track && it.track.type === "track") out.push(query(it.track));
-					url = res.next;
+				// Fallback to Web API albums/{id}/tracks
+				if (!handled) {
+					try {
+						for (let url = `albums/${idOf(uri)}/tracks?limit=50`; url; ) {
+							const res = await webApi(url);
+							for (const t of res.items || []) out.push(query(t));
+							url = res.next;
+						}
+					} catch (e) {
+						console.error("Album resolution error:", e);
+					}
+				}
+			} else if (type === "playlist" || type === "playlist_v2") {
+				let handled = false;
+				// Try Platform.PlaylistAPI (native desktop)
+				if (Spicetify.Platform?.PlaylistAPI?.getContents) {
+					try {
+						const rawUri = typeof uri === "string" && uri.startsWith("spotify:") ? uri : `spotify:playlist:${idOf(uri)}`;
+						const pRes = await Spicetify.Platform.PlaylistAPI.getContents(rawUri, { limit: 1000 });
+						if (pRes && pRes.items && pRes.items.length) {
+							for (const it of pRes.items) {
+								const t = it.track || it;
+								if (t && (t.name || t.artists)) {
+									const q = query(t);
+									if (q) out.push(q);
+								} else if (t.uri) {
+									trackIds.push(idOf(t.uri));
+								}
+							}
+							handled = true;
+						}
+					} catch (_) {}
+				}
+				// Fallback to Web API playlists/{id}/tracks
+				if (!handled) {
+					try {
+						for (let url = `playlists/${idOf(uri)}/tracks?limit=100&fields=next,items(track(name,type,artists(name)))`; url; ) {
+							const res = await webApi(url);
+							for (const it of res.items || []) if (it.track && it.track.type === "track") out.push(query(it.track));
+							url = res.next;
+						}
+					} catch (e) {
+						console.error("Playlist resolution error:", e);
+					}
 				}
 			}
 		}
+
 		await flushTracks();
 		return out;
 	}
 
 	// ---------- sending ----------
 	let running = null;
-	async function sendAll(uris, mode) {
+
+	async function sendQueries(queries, mode) {
 		if (running) { running.stop = true; notify("Stopping..."); return; }
 		if (!cfg.uid || !cfg.token) { openSettings(); return; }
+		if (!queries.length) { notify("No tracks found.", true); return; }
 		const botId = cfg.botId;
 		running = { stop: false };
 		try {
 			if (!bots.length) await loadBots().catch(() => {});
-			let queries;
-			try { queries = await resolveQueries(uris); } catch (e) { throw new Error("Could not read track info from Spotify: " + (e.message || e)); }
-			if (!queries.length) throw new Error("No tracks found.");
 			const failed = [];
 			let done = 0;
 			for (const [i, q] of queries.entries()) {
 				if (running.stop) break;
-				// "play" only for the first track; the rest are queued behind it
 				const cmd = mode === "play" && i === 0 ? "play" : "add";
 				notify(`${queries.length > 1 ? `${i + 1}/${queries.length} ` : ""}${cmd === "play" ? "Playing" : "Queueing"} on ${botName(botId)}: ${q}`);
 				try {
@@ -118,6 +299,19 @@
 			notify(e.message, true);
 		} finally {
 			running = null;
+		}
+	}
+
+	async function sendAll(uris, mode) {
+		if (running) { running.stop = true; notify("Stopping..."); return; }
+		if (!cfg.uid || !cfg.token) { openSettings(); return; }
+		try {
+			let queries;
+			try { queries = await resolveQueries(uris); } catch (e) { throw new Error("Could not read track info from Spotify: " + (e.message || e)); }
+			if (!queries.length) throw new Error("No tracks found.");
+			await sendQueries(queries, mode);
+		} catch (e) {
+			notify(e.message, true);
 		}
 	}
 
@@ -175,8 +369,26 @@
 	}
 
 	// ---------- menus ----------
-	const T = Spicetify.URI.Type;
-	const sendable = (uris) => uris.length > 0 && uris.every((u) => [T.TRACK, T.ALBUM, T.PLAYLIST, T.PLAYLIST_V2].includes(Spicetify.URI.fromString(u).type));
+	const getUriType = (u) => {
+		if (typeof u === "string") {
+			const parts = u.split(":");
+			if (parts.length >= 2 && parts[0] === "spotify") return parts[1].toLowerCase();
+		}
+		const parsed = Spicetify.URI?.from?.(u) || (typeof u === "string" ? Spicetify.URI?.fromString?.(u) : null);
+		return String(parsed?.type || parsed?.Type || "").toLowerCase();
+	};
+
+	const isSupportedUri = (u) => {
+		const type = getUriType(u);
+		if (["track", "album", "playlist", "playlist_v2"].includes(type)) return true;
+		try {
+			if (Spicetify.URI.isTrack(u) || Spicetify.URI.isAlbum(u) || Spicetify.URI.isPlaylistV1OrV2(u)) return true;
+		} catch (_) {}
+		return false;
+	};
+
+	const sendable = (uris) => Array.isArray(uris) && uris.length > 0 && uris.every(isSupportedUri);
+
 	new Spicetify.ContextMenu.Item("Play on TS bot", (uris) => sendAll(uris, "play"), sendable, "play").register();
 	new Spicetify.ContextMenu.Item("Queue on TS bot", (uris) => sendAll(uris, "add"), sendable, "plus2px").register();
 	new Spicetify.ContextMenu.Item("TS bot settings", openSettings, sendable, "edit").register();
@@ -184,8 +396,17 @@
 	// playbar button: queue what's playing now on Spotify
 	if (Spicetify.Playbar?.Button) {
 		new Spicetify.Playbar.Button("Queue current song on TS bot", "plus2px", () => {
-			const uri = (Spicetify.Player.data?.item || Spicetify.Player.data?.track)?.uri;
-			if (uri) sendAll([uri], "add"); else notify("Nothing playing.", true);
+			const item = Spicetify.Player.data?.item;
+			if (item) {
+				const q = query(item);
+				if (q) {
+					sendQueries([q], "add");
+					return;
+				}
+			}
+			const uri = (item || Spicetify.Player.data?.track)?.uri;
+			if (uri) sendAll([uri], "add");
+			else notify("Nothing playing.", true);
 		}, false, false, true);
 	}
 
