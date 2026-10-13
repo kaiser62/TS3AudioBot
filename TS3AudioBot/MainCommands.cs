@@ -1390,6 +1390,24 @@ namespace TS3AudioBot
 			return FormatSearchResult(list, callerInfo);
 		}
 
+		// Session-free search: plays/queues the top result in one call, so it also works over the web API
+		// (which has no UserSession). Used by the browser/Spotify senders: "artist - title" -> YouTube.
+		[Command("search first play", "_undocumented")]
+		public static async Task CommandSearchFirstPlay(PlayManager playManager, InvokerData invoker, ResolveContext resolver, string resolverName, string query)
+			=> await playManager.Play(invoker, await SearchFirst(resolver, resolverName, query));
+
+		[Command("search first add", "_undocumented")]
+		public static async Task CommandSearchFirstAdd(PlayManager playManager, InvokerData invoker, ResolveContext resolver, string resolverName, string query)
+			=> await playManager.Enqueue(invoker, await SearchFirst(resolver, resolverName, query));
+
+		private static async Task<AudioResource> SearchFirst(ResolveContext resolver, string resolverName, string query)
+		{
+			var list = await resolver.Search(resolverName, query);
+			if (list.Count == 0)
+				throw new CommandException(strings.cmd_search_no_result, CommandExceptionReason.CommandError);
+			return list[0];
+		}
+
 		[Command("search get", "_undocumented")] // TODO Doc
 		public static AudioResource CommandSearchGet(UserSession session, int index)
 			=> session.GetSingleSearchResult(index);

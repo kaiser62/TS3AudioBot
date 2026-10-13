@@ -49,6 +49,13 @@ Branch `feature/web-api-public`, version `0.12.7-web-api-public.*`.
 - `deploy/userscript/`: Tampermonkey script that sends YouTube videos to a bot (Play / Queue buttons, bot picker, now playing, thumbnail hover buttons, Alt+P / Alt+Q). Users authenticate with their TeamSpeak UID + `!api token`. See [deploy/userscript/README.md](deploy/userscript/README.md).
 - Server: `music.basic.int.eu.org` → cloudflared tunnel, only `^/api/` is routed to the bot; `rights.toml` grants `cmd.api.token` to everyone so TS users can get a token.
 
+### 1d. Session-free search + Spotify sender — code change
+Branch `feature/spotify-sender`, version `0.12.11-spotify-sender.*`.
+
+- `MainCommands.cs`: `!search first play <resolver> <query>` and `!search first add <resolver> <query>` play/queue the top search result in one call. Upstream `!search from` stores results in a `UserSession`, which web API calls don't have (*"Creating UserSessions via api is currently not implemented yet"*), so search was unusable from the API. Right: `cmd.search.first.*`.
+- `deploy/spicetify/`: Spicetify extension. Right-click tracks / albums / playlists in Spotify, *Play on TS bot* / *Queue on TS bot*; each track is sent as `artist - title` to `search first ... youtube`. See [deploy/spicetify/README.md](deploy/spicetify/README.md).
+- Userscript: checkboxes on Mix / playlist entries with *Select all* and *+ Queue N*; no hover buttons on those rows.
+
 ### 2. yt-dlp via Docker wrapper — deployment (`deploy/youtube-dl`)
 Upstream calls a local `youtube-dl` binary. This fork points `[factories.youtube-dl] path = "./youtube-dl"` at a bash wrapper that runs yt-dlp in the `jeeaaasustest/youtube-dl` image:
 - optional `cookies.txt` next to the wrapper is mounted and passed with `--cookies` (never commit it);

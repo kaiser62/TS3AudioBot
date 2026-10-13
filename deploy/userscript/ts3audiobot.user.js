@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TS3AudioBot Sender
 // @namespace    https://github.com/kaiser62/TS3AudioBot
-// @version      1.2.1
+// @version      1.2.2
 // @description  Send YouTube videos to a TS3AudioBot (play now or add to queue).
 // @author       kaiser62
 // @match        https://www.youtube.com/*
@@ -244,6 +244,7 @@
 		if (hoverBox && hoverBox.contains(e.target)) return;
 		const a = e.target.closest && e.target.closest("a[href*='/watch?v='], a[href^='/shorts/'], a[href*='youtu.be/']");
 		if (!a) return;
+		if (a.closest(LIST_ITEMS)) return; // Mix / playlist rows have checkboxes instead
 		const img = a.querySelector("img, yt-image, yt-thumbnail-view-model");
 		if (!img) return; // only thumbnails, not every text link
 		if (hoverFor === a) return;
