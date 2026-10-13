@@ -369,15 +369,6 @@
 	}
 
 	// ---------- menus ----------
-	const getUriType = (u) => {
-		if (typeof u === "string") {
-			const parts = u.split(":");
-			if (parts.length >= 2 && parts[0] === "spotify") return parts[1].toLowerCase();
-		}
-		const parsed = Spicetify.URI?.from?.(u) || (typeof u === "string" ? Spicetify.URI?.fromString?.(u) : null);
-		return String(parsed?.type || parsed?.Type || "").toLowerCase();
-	};
-
 	const isSupportedUri = (u) => {
 		const type = getUriType(u);
 		if (["track", "album", "playlist", "playlist_v2"].includes(type)) return true;
@@ -394,7 +385,11 @@
 	new Spicetify.ContextMenu.Item("TS bot settings", openSettings, sendable, "edit").register();
 
 	// playbar button: queue what's playing now on Spotify
-	if (Spicetify.Playbar?.Button) {
+	function registerPlaybarButton() {
+		if (!Spicetify.Playbar?.Button) {
+			setTimeout(registerPlaybarButton, 300);
+			return;
+		}
 		new Spicetify.Playbar.Button("Queue current song on TS bot", "plus2px", () => {
 			const item = Spicetify.Player.data?.item;
 			if (item) {
@@ -409,6 +404,7 @@
 			else notify("Nothing playing.", true);
 		}, false, false, true);
 	}
+	registerPlaybarButton();
 
 	if (!cfg.uid || !cfg.token) notify("Right-click a track > TS bot settings to connect.");
 	else loadBots().catch(() => {});
