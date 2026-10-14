@@ -359,76 +359,118 @@
 		return tracks;
 	}
 
-	// ---------- track batch resolver ----------
-	async function resolveTrackUris(uris) {
-		const out = [];
-		const ids = uris.map(idOf).filter(Boolean);
-		if (!ids.length) return out;
+	// Why the last lookup found nothing, shown in the error toast so failures can be diagnosed.
+	const lookupErrors = [];
+	const noteError = (where, e) => {
+		const msg = `${where}: ${(e && (e.message || e.error?.message)) || e}`;
+		console.warn("TS3AudioBot", msg);
+		if (lookupErrors.length < 4 && !lookupErrors.includes(msg)) lookupErrors.push(msg);
+	};
 
-		if (ids.length === 1) {
-			const id = ids[0];
-			const cur = Spicetify.Player.data?.item;
-			if (cur && (idOf(cur.uri) === id || cur.id === id)) {
-				const q = query(cur);
-				if (q) return [q];
+	// GraphQL track lookup: the same internal query the desktop client uses, no Web API involved.
+	async function graphqlTrack(uri) {
+		const def = Spicetify.GraphQL?.Definitions?.getTrack;
+		if (!def || !Spicetify.GraphQL?.Request) return "";
+		const res = await Spicetify.GraphQL.Request(def, { uri });
+		const t = res?.data?.trackUnion;
+		if (!t?.name) return "";
+		const artists = [
+			...(t.firstArtist?.items || []),
+			...(t.otherArtists?.items || []),
+			...(t.artistsWithRoles?.items || []).map((a) => a.artist || a),
+		].map((a) => a?.profile?.name || a?.name).filter(Boolean);
+		return query({ name: t.name, artists: [...new Set(artists)] });
+	}
+
+	// Track rows of the playlist / album the menu was opened in, keyed by track id.
+	async function contextTracks(contextUri) {
+		const map = new Map();
+		const type = getUriType(contextUri);
+		const add = (t) => { const id = idOf(t?.uri); const q = query(t); if (id && q && !map.has(id)) map.set(id, q); };
+		if (type === "playlist" && Spicetify.Platform?.PlaylistAPI?.getContents) {
+			const res = await Spicetify.Platform.PlaylistAPI.getContents(String(contextUri), { limit: MAX_TRACKS });
+			for (const it of res?.items || []) add(it?.track || it);
+		} else if (type === "album") {
+			const def = Spicetify.GraphQL?.Definitions?.queryAlbumTracks || Spicetify.GraphQL?.Definitions?.getAlbum;
+			if (def && Spicetify.GraphQL?.Request) {
+				const res = await Spicetify.GraphQL.Request(def, { uri: String(contextUri), offset: 0, limit: 300 });
+				const items = (res?.data?.albumUnion?.tracksV2 ?? res?.data?.albumUnion?.tracks ?? {}).items || [];
+				for (const it of items) add(it?.track || it);
 			}
-			try {
-				const t = await webApi("tracks/" + id);
-				if (t) {
-					const q = query(t);
-					if (q) return [q];
-				}
-			} catch (_) {}
-			try {
-				const res = await webApi("tracks?ids=" + id);
-				for (const t of res.tracks || []) {
-					const q = query(t);
-					if (q) return [q];
-				}
-			} catch (_) {}
-			return out;
+		}
+		return map;
+	}
+
+	// Last resort: read the selected rows of the visible track list.
+	function selectedRowQueries() {
+		const rows = [...document.querySelectorAll('[role="row"][aria-selected="true"]')];
+		return rows.map((row) => {
+			const title = row.querySelector(".main-trackList-rowTitle, [data-encore-id='text'][dir='auto']")?.textContent?.trim() || "";
+			const artists = [...row.querySelectorAll('a[href*="/artist/"]')].map((a) => a.textContent.trim()).filter(Boolean);
+			return query({ name: title, artists: [...new Set(artists)] });
+		}).filter(Boolean);
+	}
+
+	// ---------- track batch resolver ----------
+	// Tries several sources per track and keeps the input order; Spotify's public Web API is often
+	// refused for the client's token, so it is not the first choice.
+	async function resolveTrackUris(uris, contextUri = null) {
+		const ids = uris.map(idOf).filter(Boolean);
+		if (!ids.length) return [];
+		const found = new Map();
+		const missing = () => ids.filter((id) => !found.has(id));
+
+		// 1. what is playing now
+		const cur = Spicetify.Player.data?.item;
+		if (cur && ids.includes(idOf(cur.uri))) { const q = query(cur); if (q) found.set(idOf(cur.uri), q); }
+
+		// 2. GraphQL getTrack, a few at a time
+		for (let i = 0; i < missing().length && Spicetify.GraphQL?.Definitions?.getTrack; ) {
+			const batch = missing().slice(i, i + 8);
+			const res = await Promise.all(batch.map((id) => graphqlTrack(`spotify:track:${id}`).catch((e) => { noteError("getTrack", e); return ""; })));
+			batch.forEach((id, k) => { if (res[k]) found.set(id, res[k]); });
+			i += batch.filter((id) => !found.has(id)).length; // skip the ones that failed
 		}
 
-		for (let i = 0; i < ids.length; i += 50) {
-			const batch = ids.slice(i, i + 50);
-			let gotBatch = false;
+		// 3. the playlist / album the menu was opened from
+		if (missing().length && contextUri) {
+			try {
+				const ctx = await contextTracks(contextUri);
+				for (const id of missing()) if (ctx.has(id)) found.set(id, ctx.get(id));
+			} catch (e) { noteError("context", e); }
+		}
+
+		// 4. Web API, batches of 50
+		for (let i = 0; i < missing().length; ) {
+			const batch = missing().slice(i, i + 50);
 			try {
 				const res = await webApi("tracks?ids=" + batch.join(","));
-				if (Array.isArray(res?.tracks)) {
-					for (const t of res.tracks) {
-						const q = query(t);
-						if (q) out.push(q);
-					}
-					gotBatch = true;
-				}
-			} catch (_) {}
-
-			if (!gotBatch) {
-				for (const id of batch) {
-					try {
-						const t = await webApi("tracks/" + id);
-						if (t) {
-							const q = query(t);
-							if (q) out.push(q);
-						}
-					} catch (_) {}
-				}
-			}
+				for (const t of res?.tracks || []) { const q = query(t); if (t?.id && q) found.set(t.id, q); }
+			} catch (e) { noteError("Web API", e); break; }
+			i += batch.filter((id) => !found.has(id)).length;
 		}
-		return out;
+
+		// 5. selected rows on screen, only when they line up with what is still missing
+		if (missing().length === ids.length) {
+			const rows = selectedRowQueries();
+			if (rows.length === ids.length) return rows;
+		}
+
+		return ids.map((id) => found.get(id)).filter(Boolean);
 	}
 
 	// Resolves track / album / playlist / collection URIs to "artist - title" search strings, in order.
 	async function resolveQueries(uris, contextUri = null) {
 		const effective = getEffectiveUris(uris, contextUri);
 		if (!effective.length) return [];
+		lookupErrors.length = 0;
 
 		const out = [];
 		const trackUris = [];
 
 		const flushTracks = async () => {
 			if (!trackUris.length) return;
-			const res = await resolveTrackUris(trackUris);
+			const res = await resolveTrackUris(trackUris, contextUri);
 			out.push(...res);
 			trackUris.length = 0;
 		};
@@ -505,7 +547,7 @@
 			} catch (e) {
 				throw new Error("Could not read track info from Spotify: " + (e.message || e));
 			}
-			if (!queries.length) throw new Error("No tracks found in selection or playlist.");
+			if (!queries.length) throw new Error("No tracks found in selection or playlist." + (lookupErrors.length ? " (" + lookupErrors.join("; ") + ")" : ""));
 			await sendQueries(queries, mode);
 		} catch (e) {
 			notify(e.message, true);
