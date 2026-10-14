@@ -12,7 +12,7 @@
 	const KEY = "ts3audiobot:settings";
 	// searchSuffix is appended to every YouTube search: "lyrics" favours plain audio uploads over music videos with
 	// intros/skits, "explicit" favours uncensored versions. Empty turns it off.
-	const DEFAULTS = { baseUrl: "https://music.basic.int.eu.org", uid: "", token: "", botId: 0, searchSuffix: "lyrics explicit" };
+	const DEFAULTS = { baseUrl: "", uid: "", token: "", botId: 0, searchSuffix: "lyrics explicit" };
 	let cfg = { ...DEFAULTS };
 	try { cfg = { ...DEFAULTS, ...JSON.parse(Spicetify.LocalStorage.get(KEY) || "{}") }; } catch (_) {}
 	const save = () => Spicetify.LocalStorage.set(KEY, JSON.stringify(cfg));
@@ -572,7 +572,7 @@
 
 	function openSettings() {
 		const field = { display: "block", width: "100%", boxSizing: "border-box", height: "34px", padding: "0 8px", margin: "4px 0 10px", borderRadius: "4px", border: "1px solid #555", background: "#222", color: "#fff" };
-		const url = el("input", { type: "text", value: cfg.baseUrl, style: field });
+		const url = el("input", { type: "text", value: cfg.baseUrl, placeholder: "https://music.example.org", style: field });
 		const uid = el("input", { type: "text", value: cfg.uid, placeholder: "TeamSpeak unique ID, ends with =", style: field });
 		const token = el("input", { type: "password", value: cfg.token, placeholder: "from a private message: !api token", style: field });
 		const bot = el("select", { style: field });

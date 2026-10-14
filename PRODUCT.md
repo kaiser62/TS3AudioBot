@@ -35,7 +35,7 @@ Upstream TS3AudioBot only takes chat commands and an internal web UI. This fork 
 - Bot API commands used: `/bot/list`, `/bot/use/<id>/(/play|add/<url>)`, `/bot/use/<id>/(/song)`, `/bot/use/<id>/(/search/first/play|add/youtube/<query>)`.
 - Bot names and IDs come from the server. Nothing is hard-coded except a default server URL that release users must change.
 - Must not break YouTube's own UI or navigation. Clicks on our controls must not open videos.
-- License: GPL-3.0, inherited from upstream Splamy/TS3AudioBot; upstream credit stays.
+- License: OSL-3.0, inherited from upstream Splamy/TS3AudioBot; upstream credit stays.
 - Release plan: keep the fork `kaiser62/TS3AudioBot`, rewrite its README for this version, and publish a tagged GitHub Release with the Linux binary, userscript and Spicetify extension attached.
 
 ## Evidence on Hand

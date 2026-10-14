@@ -21,7 +21,7 @@ The bot can't stream from Spotify. For each track the extension sends `artist - 
    spicetify apply
    ```
 4. In TeamSpeak, send one of the bots a **private message**: `!api token`. It replies with a token.
-5. In Spotify, right-click any track and choose **TS bot settings**. Server URL `https://music.basic.int.eu.org`, your TeamSpeak UID (*Tools → Identities → Unique ID*) and the token, **Test connection**, pick a bot, **Save**.
+5. In Spotify, right-click any track and choose **TS bot settings**. Enter your bot server's HTTPS address (ask whoever runs the bot), your TeamSpeak UID (*Tools → Identities → Unique ID*) and the token, **Test connection**, pick a bot, **Save**.
 
 To update, copy the new `ts3audiobot.js` over the old one and run `spicetify apply`.
 

@@ -1,9 +1,66 @@
-# TS3AudioBot (kaiser62 fork)
+# TS3AudioBot — kaiser62 edition
 
-> Fork of [Splamy/TS3AudioBot](https://github.com/Splamy/TS3AudioBot) at upstream `a69a38d8` (v0.12.x, netcoreapp3.1).
-> Everything below the "Upstream README" line is the original upstream README.
+A TeamSpeak 3 music bot, forked from [Splamy/TS3AudioBot](https://github.com/Splamy/TS3AudioBot). It adds what a small community needs to feed its bots from where people actually find music:
 
-## Changes from upstream
+- **YouTube userscript.** Play or queue the video you're watching, or tick songs in a Mix or playlist and queue them all at once. It shows live progress and, for each song that fails, the reason. → [deploy/userscript](deploy/userscript/README.md)
+- **Spotify (Spicetify) extension.** Right-click tracks, albums, playlists, Liked Songs or artists in the Spotify desktop app. Each track is played from its best YouTube match. → [deploy/spicetify](deploy/spicetify/README.md)
+- **Safe public web API.**
+  - Per-user tokens (`!api token`).
+  - Blocking of anonymous remote requests.
+  - Cloudflare-aware client IPs.
+  - Session-free `search first play|add` commands, which the senders use.
+- **YouTube that keeps working.**
+  - yt-dlp runs in Docker, with cookies, a cache and auto-update.
+  - Range-chunked downloads avoid the googlevideo 403s.
+  - Better audio format selection.
+  - Readable error messages ("age-restricted", "refresh cookies", …) instead of "failed to load".
+- **Channel step log.** Optionally, the bot narrates each request in its channel: search, resolve, yt-dlp, ffmpeg and playback. This makes "why didn't it play?" answerable.
+
+## Download
+
+Get the latest build from [Releases](https://github.com/kaiser62/TS3AudioBot/releases):
+
+| Asset | What it is |
+|---|---|
+| `TS3AudioBot-<version>-linux-x64.tar.gz` | The bot (self-contained single file, no .NET needed) with the web interface and the `deploy/` scripts |
+| `ts3audiobot.user.js` | YouTube userscript for Tampermonkey or Violentmonkey |
+| `ts3audiobot.js` | Spicetify extension for the Spotify desktop app |
+
+Only Linux x64 is built. For other platforms, build from source (see [Building](#6-building)).
+
+## Quick start (server owner)
+
+1. **Install the dependencies:**
+   - `sudo apt-get install libopus-dev ffmpeg python3`.
+   - [Docker](https://docs.docker.com/engine/install/), for the yt-dlp wrapper.
+   - [Deno](https://deno.land/), which yt-dlp needs to solve YouTube's JavaScript challenges.
+2. **Unpack the release and run the bot:** `tar xzf TS3AudioBot-*-linux-x64.tar.gz && cd TS3AudioBot && ./TS3AudioBot`. Follow the first-run setup: the TeamSpeak server address and an admin unique ID.
+3. **Set up YouTube** with the scripts in [`deploy/`](deploy/README.md). In `ts3audiobot.toml`:
+   ```toml
+   [factories.youtube-dl]
+   path = "./youtube-dl"        # yt-dlp in Docker
+   [tools.ffmpeg]
+   path = "./ffmpeg-wrap.sh"    # chunked googlevideo downloads
+   ```
+   If YouTube asks you to "confirm you're not a bot", put a `cookies.txt` (Netscape format) next to `youtube-dl`. **Never commit or share it.**
+4. **Enable the web API for the senders.** Skip this if you only use chat commands.
+   - In `ts3audiobot.toml`:
+     ```toml
+     [web.api]
+     enabled = true
+     allow_anonymous_remote = false   # required once the API is reachable from the internet
+     ```
+   - In `rights.toml`, give everyone `cmd.api.token`, `cmd.bot.list`, `cmd.bot.use`, `cmd.song`, `cmd.play`, `cmd.add` and `cmd.search.first.*`.
+   - Publish **only** `/api/*` over HTTPS. A Cloudflare Tunnel works well, and so does a reverse proxy that forwards `/api/` to `http://127.0.0.1:58913`. The token is a password, so don't expose plain HTTP.
+5. **Hand out the senders.** Each user installs the userscript and/or the Spicetify extension. They send any bot the private message `!api token` and paste your HTTPS address, their unique ID and that token into the setup dialog.
+
+Requests from the senders run with the sender's own TeamSpeak identity and rights, exactly as if they had typed the command in chat.
+
+## Credits and license
+
+This is a fork of [TS3AudioBot](https://github.com/Splamy/TS3AudioBot) by Splamy and contributors, and all upstream credit stays with them. Like upstream, it is licensed under the [Open Software License 3.0](LICENSE) (see also [LICENSE_COMPLETE](LICENSE_COMPLETE)). The fork is based on upstream `a69a38d8` (v0.12.x, netcoreapp3.1). The original upstream README is kept at the bottom of this file.
+
+## Changes from upstream (details)
 
 ### 1. Per-bot channel step log (`channel_log`) — code change
 Branch `feature/channel-step-log`, version `0.12.4-channel-step-log.*`.
@@ -46,15 +103,16 @@ Branch `feature/web-api-public`, version `0.12.7-web-api-public.*`.
 - `Web/Api/WebApi.cs`: behind a loopback proxy the client IP is taken from `CF-Connecting-IP` (set by Cloudflare, cannot be spoofed through the tunnel) before `X-Real-IP`. Upstream trusted `X-Real-IP` from any loopback request, so through a tunnel anyone could claim `127.0.0.1` and match `ip = 127.0.0.1` admin rules.
 - New `[web.api] allow_anonymous_remote` (default `true`, upstream behaviour). Set to `false` to reject token-less requests that don't come from the server itself.
 - Fixed the anonymous check: it compared against `Uid.Null`, but anonymous calls use `Uid.Anonymous`, so it never fired.
-- `deploy/userscript/`: Tampermonkey script that sends YouTube videos to a bot (Play / Queue buttons, bot picker, now playing, thumbnail hover buttons, Alt+P / Alt+Q). Users authenticate with their TeamSpeak UID + `!api token`. See [deploy/userscript/README.md](deploy/userscript/README.md).
-- Server: `music.basic.int.eu.org` → cloudflared tunnel, only `^/api/` is routed to the bot; `rights.toml` grants `cmd.api.token` to everyone so TS users can get a token.
+- `deploy/userscript/`: Tampermonkey script that sends YouTube videos to a bot. Users authenticate with their TeamSpeak UID + `!api token`. See [deploy/userscript/README.md](deploy/userscript/README.md).
+- Recommended exposure: a cloudflared tunnel (or reverse proxy) that routes only `^/api/` to the bot; `rights.toml` grants `cmd.api.token` to everyone so TS users can get a token.
 
 ### 1d. Session-free search + Spotify sender — code change
 Branch `feature/spotify-sender`, version `0.12.11-spotify-sender.*`.
 
 - `MainCommands.cs`: `!search first play <resolver> <query>` and `!search first add <resolver> <query>` play/queue the top search result in one call. Upstream `!search from` stores results in a `UserSession`, which web API calls don't have (*"Creating UserSessions via api is currently not implemented yet"*), so search was unusable from the API. Right: `cmd.search.first.*`.
 - `deploy/spicetify/`: Spicetify extension. Right-click tracks / albums / playlists in Spotify, *Play on TS bot* / *Queue on TS bot*; each track is sent as `artist - title` to `search first ... youtube`. See [deploy/spicetify/README.md](deploy/spicetify/README.md).
-- Userscript: checkboxes on Mix / playlist entries with *Select all* and *+ Queue N*; no hover buttons on those rows.
+- Spotify searches get `lyrics explicit` appended by default (editable), favouring plain audio and uncensored versions.
+- Userscript 1.3.0: redesigned to look native on YouTube (light/dark); multi-select from Mixes/playlists with a progress and result tray.
 
 ### 2. yt-dlp via Docker wrapper — deployment (`deploy/youtube-dl`)
 Upstream calls a local `youtube-dl` binary. This fork points `[factories.youtube-dl] path = "./youtube-dl"` at a bash wrapper that runs yt-dlp in the `jeeaaasustest/youtube-dl` image:
@@ -93,10 +151,13 @@ GitVersion needs local `master` and `develop` branches in the clone (`git fetch 
 ### Known issues
 - On the production host ~40% of IPv4 TCP SYNs to Google IPs are silently dropped (other hosts on the LAN and non-Google destinations are fine); connects hang ~20s then fall back to IPv6 which is unreachable. The `--socket-timeout 5`, `skip=hls`, and ytchunk timeouts are mitigations, not a fix. Root cause (host firewall / VPN / router) still open.
 - YouTube live streams are disabled by `skip=hls`.
+- `deploy/youtube-dl` builds a `sh -c` string by wrapping each argument in single quotes. A search containing an apostrophe (e.g. *Don't Stop Me Now*) therefore fails, and a crafted query can run commands inside the yt-dlp container, which has `cookies.txt` mounted. Until this is fixed, only grant `cmd.search.*` / `cmd.play` to people you trust, and treat the cookies as exposed to them.
 
 ---
 
 # Upstream README
+
+> Kept as-is from Splamy/TS3AudioBot. Its download links point at upstream builds, which lack this fork's changes.
 
 ## TS3AudioBot (upstream)
 
