@@ -4,10 +4,10 @@ Adds TeamSpeak controls to YouTube so you can send songs to a TS3AudioBot music 
 
 - **Pick songs from Mixes and playlists.** Each song in a Mix panel or on a playlist page gets a checkbox. Shift+click selects a range, and **Select all N** sits in the Mix panel header. A tray then shows **Queue N on ‹bot›**.
 - **Progress and results.** While songs are sent one by one, the tray shows progress and a **Stop** button. When it finishes it says how many were queued. Songs that failed stay selected and **Why?** lists the reason for each, with **Try N again** to resend them.
-- **Under the video:** **Play** (play now) and **Queue** (add to the end), the bot that will receive it, and what that bot is playing now.
-- **On thumbnails:** Play and Queue buttons appear when you point at a video. You can turn them off in settings.
+- **Next to Like and Share:** **Play** (play now), **Queue** (add to the end) and a ▾ menu to pick the bot. They look like YouTube's own buttons and turn icon-only when the row gets narrow. Point at ▾ to see the bot and what it's playing.
+- **On thumbnails:** Play and Queue icon buttons appear when you point at a video. You can turn them off in settings.
 - **Keyboard:** `Alt+P` plays the current video now and `Alt+Q` queues it.
-- **Choosing the bot:** click the bot name (green dot = online) anywhere to switch bots. The choice is remembered.
+- **Choosing the bot:** click ▾ next to Play/Queue (or the bot name in the selection tray) to switch bots. The choice is remembered.
 - Works on youtube.com (including Shorts), m.youtube.com and music.youtube.com.
 
 ## Install
@@ -22,7 +22,7 @@ Adds TeamSpeak controls to YouTube so you can send songs to a TS3AudioBot music 
 
 The first request asks Tampermonkey to allow the connection to your server. Choose *Always allow domain*.
 
-You can reopen the settings with the bot name's menu (**Connection settings**) or from the Tampermonkey menu.
+You can reopen the settings from the ▾ menu (**Connection settings**) or from the Tampermonkey menu.
 
 ## Notes
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TS3AudioBot Sender
 // @namespace    https://github.com/kaiser62/TS3AudioBot
-// @version      1.3.2
+// @version      1.4.0
 // @description  Send YouTube videos, or songs picked from Mixes and playlists, to a TS3AudioBot TeamSpeak music bot.
 // @author       kaiser62
 // @match        https://www.youtube.com/*
@@ -165,11 +165,12 @@ html[dark],html:has(ytmusic-app){
 .tsab-btn.busy .tsab-spin{display:inline-block;margin-left:-4px}
 .tsab-btn.busy>.tsab-ic{display:none}
 
-.tsab-chip{gap:8px;max-width:240px;padding:0 8px 0 12px;font-weight:500}
+.tsab-chip{gap:6px;max-width:150px;padding:0 6px 0 10px;font-weight:500}
 .tsab-chip .name{overflow:hidden;text-overflow:ellipsis}
 .tsab-chip>.tsab-ic{margin:0 0 0 -4px}
 .tsab-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--tsab-line-strong)}
 .tsab-dot.on{background:var(--tsab-ok)}
+.tsab-dot.live{background:var(--tsab-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--tsab-accent) 30%,transparent)}
 .tsab-on{color:var(--tsab-fg2);font:400 14px var(--tsab-font)}
 
 .tsab-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 0;color:var(--tsab-fg);font:400 14px var(--tsab-font)}
@@ -184,6 +185,23 @@ html[dark],html:has(ytmusic-app){
 .tsab-bar.compact .tsab-btn>.tsab-ic{margin:0}
 .tsab-bar.compact .tsab-btn:not(.tsab-chip) .tsab-label,.tsab-bar.compact .tsab-on,.tsab-bar.compact .tsab-np,.tsab-bar.compact .tsab-setup-note{display:none}
 .tsab-bar.compact .tsab-chip{max-width:150px}
+/* in YouTube's like/share row; "tight" when the row runs out of room */
+.tsab-bar.inrow{flex:none;flex-wrap:nowrap;margin:0 8px 0 0}
+.tsab-bar.inrow .tsab-on,.tsab-bar.inrow .tsab-np,.tsab-bar.inrow .tsab-setup-note{display:none}
+.tsab-bar.tight .tsab-btn{width:36px;padding:0;justify-content:center}
+.tsab-bar.tight .tsab-btn>.tsab-ic{margin:0}
+.tsab-bar.tight .tsab-btn .tsab-label{display:none}
+/* clones of YouTube's own action buttons (see ytButton) */
+.tsab-seg{display:flex}
+.tsab-seg>button.tsab-yt{flex:none}
+button.tsab-yt{cursor:pointer}
+.tsab-yt .tsab-ic{display:block;width:24px;height:24px}
+.tsab-yt .tsab-spin{width:20px;height:20px;margin:2px}
+.tsab-yt.busy .tsab-spin{display:block}
+.tsab-yt.busy .tsab-ic{display:none}
+.tsab-bar.tight button.tsab-yt .tsab-label{display:none}
+.tsab-bar.tight button.tsab-yt.tsab-labelled{padding:0 12px}
+.tsab-bar.tight button.tsab-yt .tsab-icwrap{margin:0}
 
 .tsab-hover{position:fixed;z-index:2200;display:flex;align-items:center;gap:4px;font:400 12px/16px var(--tsab-font)}
 .tsab-hover button{display:grid;place-items:center;width:32px;height:32px;padding:0;border:0;border-radius:50%;
@@ -191,9 +209,6 @@ html[dark],html:has(ytmusic-app){
 .tsab-hover button:hover{background:rgba(0,0,0,.92)}
 .tsab-hover button.busy .tsab-spin{display:inline-block;margin:0}
 .tsab-hover button.busy .tsab-ic{display:none}
-.tsab-hover .tip{margin-left:2px;padding:4px 8px;border-radius:4px;background:rgba(0,0,0,.85);color:#fff;white-space:nowrap;
-  opacity:0;transition:opacity .12s}
-.tsab-hover:hover .tip,.tsab-hover:focus-within .tip{opacity:1}
 
 .tsab-cb{width:18px;height:18px;margin:0 8px 0 4px;flex:none;align-self:center;cursor:pointer;accent-color:var(--tsab-accent)}
 .tsab-panel-all{margin:4px 0 4px 8px}
@@ -418,6 +433,7 @@ html[dark],html:has(ytmusic-app){
 	const currentVideoId = () => videoIdFrom(location.href);
 
 	// ---------- bot chip + menu ----------
+	const np = { text: "", live: false }; // what the chosen bot is playing, shown on the chips
 	function botChip() {
 		const dot = h("span", { class: "tsab-dot" });
 		const name = h("span", { class: "name" });
@@ -426,9 +442,9 @@ html[dark],html:has(ytmusic-app){
 		chip.sync = () => {
 			const n = botName(cfg.botId), on = botOnline(cfg.botId);
 			if (name.textContent !== n) name.textContent = n;
-			const dc = "tsab-dot" + (on ? " on" : "");
+			const dc = "tsab-dot" + (on ? " on" : "") + (np.live ? " live" : "");
 			if (dot.className !== dc) dot.className = dc;
-			const t = `Songs go to ${n}${on === false ? " (offline)" : ""}. Click to choose another bot.`;
+			const t = `Songs go to ${n}${on === false ? " (offline)" : ""}.${np.text ? ` ${np.text}.` : ""} Click to choose another bot.`;
 			if (chip.title !== t) { chip.title = t; chip.setAttribute("aria-label", `Bot: ${n}${on === false ? ", offline" : ""}. Change bot`); }
 		};
 		chip.sync();
@@ -436,7 +452,52 @@ html[dark],html:has(ytmusic-app){
 	}
 	// "on <bot>" never wraps apart
 	const dest = (chip) => h("span", { class: "tsab-dest" }, h("span", { class: "tsab-on", textContent: "on" }), chip);
-	function updateChips() { document.querySelectorAll(".tsab-chip").forEach((c) => c.sync && c.sync()); }
+	function updateChips() { document.querySelectorAll(".tsab-chip, [data-tsab-chip]").forEach((c) => c.sync && c.sync()); }
+	// the watch row's bot picker: only a dropdown arrow; the bot's name is in its tooltip and menu
+	function botDrop(yt) {
+		const b = yt ? ytButton(yt.more, "caret", "", () => openBotMenu(b), "")
+			: button("Choose bot", "caret", "icon-only", (e) => { e.stopPropagation(); openBotMenu(b); });
+		b.setAttribute("aria-haspopup", "menu");
+		b.setAttribute("aria-expanded", "false");
+		b.dataset.tsabChip = "";
+		b.sync = () => {
+			const n = botName(cfg.botId), on = botOnline(cfg.botId);
+			const t = `Songs go to ${n}${on === false ? " (offline)" : ""}.${np.text ? ` ${np.text}.` : ""} Click to choose another bot.`;
+			if (b.title !== t) { b.title = t; b.setAttribute("aria-label", `Choose bot, now ${n}`); }
+		};
+		b.sync();
+		return b;
+	}
+	// YouTube's own action buttons (Share, the "more" button, the like/dislike segment classes), to clone.
+	// Null until YouTube has drawn them.
+	function ytTemplates(row) {
+		const btns = [...row.querySelectorAll("#top-level-buttons-computed button")];
+		const labelled = (b) => [...b.children].some((c) => c.tagName === "DIV" && c.getAttribute("aria-hidden") !== "true" && c.textContent.trim());
+		const share = btns.find((b) => !/Segmented/.test(b.className) && b.querySelector("svg") && labelled(b));
+		const more = row.querySelector("#actions-inner ytd-menu-renderer > yt-button-shape button, #actions-inner #button-shape button");
+		const seg = (re) => btns.map((b) => [...b.classList].find((c) => re.test(c))).find(Boolean) || "";
+		return share && more ? { share, more, segStart: seg(/SegmentedStart/), segEnd: seg(/SegmentedEnd/) } : null;
+	}
+	// a copy of a YouTube button with our icon, label and click handler, so it looks and reacts exactly like theirs
+	function ytButton(tpl, iconName, label, onclick, title, extraClass) {
+		const b = tpl.cloneNode(true);
+		for (const a of ["id", "aria-pressed", "aria-disabled", "style", "title"]) b.removeAttribute(a);
+		b.type = "button";
+		b.classList.add("tsab-yt");
+		if (extraClass) b.classList.add(extraClass);
+		b.setAttribute("aria-label", label || title);
+		if (title) b.title = title;
+		const kids = [...b.children];
+		const wrap = kids.find((c) => c.tagName === "DIV" && c.getAttribute("aria-hidden") === "true" && c.querySelector("svg"));
+		const text = kids.find((c) => c.tagName === "DIV" && c !== wrap && c.textContent.trim());
+		if (wrap) { wrap.classList.add("tsab-icwrap"); wrap.replaceChildren(spinner(), icon(iconName)); }
+		if (text) {
+			if (label) { text.textContent = label; text.classList.add("tsab-label"); b.classList.add("tsab-labelled"); }
+			else text.remove();
+		}
+		b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onclick(e); });
+		return b;
+	}
 
 	let pop;
 	function closePop() {
@@ -457,6 +518,7 @@ html[dark],html:has(ytmusic-app){
 		anchor.setAttribute("aria-expanded", "true");
 		const fill = () => {
 			const items = [h("div", { class: "tsab-pop-head", textContent: "Send songs to" })];
+			if (np.text) items.push(h("p", { class: "tsab-pop-note", textContent: np.text }));
 			if (!ready()) items.push(h("p", { class: "tsab-pop-note", textContent: "Not connected to a bot server yet." }));
 			else if (!bots.length && botsError) items.push(h("p", { class: "tsab-pop-note err", textContent: botsError.message }));
 			else if (!bots.length) items.push(h("p", { class: "tsab-pop-note", textContent: "Loading bots…" }));
@@ -642,9 +704,9 @@ html[dark],html:has(ytmusic-app){
 	GM_registerMenuCommand("Add this video to the queue", () => send(currentVideoId(), "add"));
 
 	// ---------- watch page bar ----------
-	let bar, npEl, npSeq = 0;
+	let bar, npEl, npSeq = 0, fitObs;
 	async function refreshNowPlaying() {
-		if (!npEl || !npEl.isConnected || !ready() || document.hidden) return;
+		if (!npEl || !bar || !bar.isConnected || !ready() || document.hidden) return;
 		const el = npEl, name = botName(cfg.botId), seq = ++npSeq;
 		let text, live = false;
 		try {
@@ -655,24 +717,64 @@ html[dark],html:has(ytmusic-app){
 			text = e.fixable ? e.message : `Nothing is playing on ${name}`;
 		}
 		if (seq !== npSeq || el.dataset.t === text) return; // a newer request already answered
+		np.text = text; np.live = live;
+		updateChips();
 		el.dataset.t = text;
 		el.classList.toggle("live", live);
 		el.replaceChildren(icon("eq"), h("span", { textContent: text }));
 	}
 
-	function removeBar() { if (bar) bar.remove(); bar = null; npEl = null; }
+	function removeBar() { if (bar) bar.remove(); bar = null; npEl = null; if (fitObs) fitObs.disconnect(); fitObs = null; }
+	// Fit the bar into the like/share row: full, then icon-only buttons;
+	// if YouTube's own buttons still overflow, the bar moves onto its own line under the row.
+	// All steps run in one task, so nothing flickers.
+	function fitBar() {
+		if (!bar || !bar.isConnected || !bar.dataset.row) return;
+		const top = bar.closest("ytd-watch-metadata"), row = top && top.querySelector("#top-row"), inner = row && row.querySelector("#actions-inner");
+		if (!inner) return;
+		// YouTube's row can overflow a little on its own; only overflow we add counts
+		bar.remove();
+		const base = row.scrollWidth - row.clientWidth;
+		const fits = () => row.scrollWidth - row.clientWidth <= base + 1;
+		inner.before(bar);
+		const set = (c) => { if (bar.className !== c) bar.className = c; };
+		for (const c of ["tsab-bar inrow", "tsab-bar inrow tight"]) {
+			set(c);
+			if (fits()) return;
+		}
+		set("tsab-bar below");
+		row.after(bar);
+	}
+
 	function rebuildBar() { removeBar(); ensureBar(); }
 
 	function ensureBar() {
 		if (!currentVideoId()) { removeBar(); return; }
-		const anchor = document.querySelector("ytd-watch-metadata #title, #above-the-fold #title, ytd-reel-video-renderer[is-active] #metapanel, ytmusic-player-bar .middle-controls");
+		// www watch page: first item of the like/share row; elsewhere under the title or in the player bar
+		const row = document.querySelector("ytd-watch-metadata #top-row");
+		const inRow = !!(row && row.querySelector("#actions-inner") && row.getClientRects().length);
+		const anchor = inRow ? row.querySelector("#actions-inner") : document.querySelector("ytd-watch-metadata #title, #above-the-fold #title, ytd-reel-video-renderer[is-active] #metapanel, ytmusic-player-bar .middle-controls");
 		if (!anchor) return;
 		const mode = ready() ? "ready" : "setup";
-		if (bar && bar.isConnected && bar.previousElementSibling === anchor && bar.dataset.mode === mode) return;
+		// in the row, fitBar may have moved the bar under the row; both spots count as placed
+		const yt = inRow ? ytTemplates(row) : null;
+		const placed = bar && (inRow ? bar.dataset.row && (bar.nextElementSibling === anchor || bar.previousElementSibling === row) : bar.previousElementSibling === anchor);
+		// rebuild once YouTube's buttons exist to copy, if the bar was drawn before them
+		if (placed && bar.isConnected && bar.dataset.mode === mode && (!yt || bar.dataset.yt)) return;
 		removeBar();
-		const compact = !!anchor.closest("ytmusic-player-bar, ytd-reel-video-renderer");
-		const cls = "tsab-bar" + (compact ? " compact" : "");
-		if (mode === "setup") {
+		const compact = !inRow && !!anchor.closest("ytmusic-player-bar, ytd-reel-video-renderer");
+		const cls = "tsab-bar" + (compact ? " compact" : inRow ? " inrow" : "");
+		if (yt && mode === "setup") {
+			bar = h("div", { class: cls, "data-mode": mode, "data-yt": "1" },
+				ytButton(yt.share, "gear", "Connect TS3AudioBot", openSettings, "Set up sending videos to your TeamSpeak music bot"));
+		} else if (yt) {
+			npEl = h("div", { class: "tsab-np" }); // not shown in the row; it feeds the dropdown's tooltip
+			bar = h("div", { class: cls, "data-mode": mode, "data-yt": "1", role: "group", "aria-label": "Send to TeamSpeak bot" },
+				h("div", { class: "tsab-seg" },
+					ytButton(yt.share, "play", "Play", (e) => send(currentVideoId(), "play", e.currentTarget), "Play this video now on the TeamSpeak bot (Alt+P)", yt.segStart),
+					ytButton(yt.share, "queue", "Queue", (e) => send(currentVideoId(), "add", e.currentTarget), "Add this video to the end of the bot's queue (Alt+Q)", yt.segEnd)),
+				botDrop(yt));
+		} else if (mode === "setup") {
 			bar = h("div", { class: cls, "data-mode": mode },
 				button("Connect TS3AudioBot", "gear", "", openSettings, "Set up sending videos to your TeamSpeak music bot"),
 				h("span", { class: "tsab-setup-note", textContent: "Send this video to your TeamSpeak music bot." }));
@@ -681,10 +783,19 @@ html[dark],html:has(ytmusic-app){
 			bar = h("div", { class: cls, "data-mode": mode, role: "group", "aria-label": "Send to TeamSpeak bot" },
 				button("Play", "play", "primary", (e) => send(currentVideoId(), "play", e.currentTarget), "Play this video now on the TeamSpeak bot (Alt+P)"),
 				button("Queue", "queue", "", (e) => send(currentVideoId(), "add", e.currentTarget), "Add this video to the end of the bot's queue (Alt+Q)"),
-				dest(botChip()),
+				inRow ? botDrop(null) : dest(botChip()),
 				npEl);
 		}
-		anchor.after(bar);
+		if (inRow) {
+			bar.dataset.row = "1";
+			anchor.before(bar);
+			fitBar();
+			// the row's width, and YouTube's own buttons appearing or changing their labels
+			fitObs = new ResizeObserver(() => fitBar());
+			fitObs.observe(row);
+			const ytButtons = row.querySelector("#top-level-buttons-computed");
+			if (ytButtons) fitObs.observe(ytButtons);
+		} else anchor.after(bar);
 		if (mode === "ready") {
 			if (!bots.length) loadBots().catch(() => {});
 			refreshNowPlaying();
@@ -737,17 +848,13 @@ html[dark],html:has(ytmusic-app){
 		const a = target.zone;
 		hoverFor = a;
 		hoverThumb = target.thumb;
-		const tip = h("span", { class: "tip" });
 		const mk = (iconName, mode, label) => {
 			const b = h("button", { type: "button", "aria-label": label, onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); send(id, mode, b); } },
 				spinner(), icon(iconName));
-			const say = () => { tip.textContent = ready() ? `${label} on ${botName(cfg.botId)}` : "Set up TS3AudioBot first"; };
-			b.addEventListener("mouseenter", say);
-			b.addEventListener("focus", say);
 			return b;
 		};
 		hoverBox = h("div", { class: "tsab-hover", style: { top: `${r.top + 6}px`, left: `${r.left + 6}px` } },
-			mk("play", "play", "Play now"), mk("queue", "add", "Queue"), tip);
+			mk("play", "play", "Play now"), mk("queue", "add", "Queue"));
 		hoverBox.addEventListener("mouseleave", (ev) => { if (!inZone(ev.relatedTarget)) hideHover(); });
 		a.addEventListener("mouseleave", (ev) => { if (!inZone(ev.relatedTarget)) hideHover(); }, { once: true });
 		document.body.append(hoverBox);
@@ -1007,7 +1114,7 @@ html[dark],html:has(ytmusic-app){
 		const id = currentVideoId();
 		if (!id) return;
 		e.preventDefault();
-		const btn = bar && bar.querySelectorAll(".tsab-btn")[k === "p" ? 0 : 1];
+		const btn = bar && bar.querySelectorAll(".tsab-btn, .tsab-yt")[k === "p" ? 0 : 1];
 		send(id, k === "p" ? "play" : "add", bar && bar.dataset.mode === "ready" ? btn : null);
 	}, true);
 

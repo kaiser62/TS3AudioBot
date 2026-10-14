@@ -33,10 +33,11 @@ The font is Roboto/Arial: 14px for controls, 13px for secondary lines, 12px for 
 ## Components
 
 - **Bot chip.** Shows a status dot, the bot name and a caret, always preceded by a muted "on" (`.tsab-dest`). It appears next to every send control. Clicking it opens the bot menu: a radio list of bots with server and online state, plus Connection settings. The chosen bot is the sticky default everywhere.
-- **Watch bar**, under the video title:
-  - Primary **Play**, tonal **Queue**, then "on" and the bot chip.
-  - A now-playing line underneath, with a blue equaliser icon while the bot is playing.
-  - In the music.youtube player bar and on Shorts it switches to a compact, icon-only form.
+- **Watch bar**, in YouTube's like/share row on www watch pages:
+  - **Play | Queue** as one segmented pair, then a ▾ dropdown that opens the bot menu. The dropdown shows no bot name; the name and what that bot is playing are in its tooltip and at the top of the menu.
+  - The buttons are clones of YouTube's own Share and "more" buttons (`ytButton`), with our icon and label swapped in, so they match YouTube's size, colours, hover and press feedback in light and dark mode. Until YouTube has drawn its buttons the bar uses our own styles, then rebuilds once.
+  - Fitting (`fitBar`): full labels, then icon-only buttons, then its own line under the row, picked by measuring whether YouTube's row overflows more than it already does on its own.
+  - Elsewhere (m.youtube, Shorts, the music.youtube player bar) it sits under the title or in the player bar as before, with the bot chip and the now-playing line; the player bar and Shorts use the compact, icon-only form.
   - When the script isn't set up, the bar shows a single **Connect TS3AudioBot** button instead.
 - **Row checkbox.** A native checkbox with an accent colour, placed before the index of each Mix or playlist row. Shift+click selects a range.
 - **Panel "Select all N".** One small tonal button in the Mix panel header. Its icon shows whether every song is selected.
@@ -47,7 +48,7 @@ The font is Roboto/Arial: 14px for controls, 13px for secondary lines, 12px for 
   - **job**: a spinner, "Queueing i of N on bot", the current title, **Stop** and a progress bar.
   - **result**: queued count and failures. **Why?** expands the reasons, **Try N again** resends, and close dismisses it. A fully successful result dismisses itself after 6s.
 - **Snackbar.** Appears bottom left with the inverse colours, as YouTube's does. It covers single sends, with busy, ok and error states. It can carry one action, such as **Settings** for connection or login errors. It rises above the centred tray when the two would overlap.
-- **Hover buttons.** Two 32px dark round buttons at the top left of a thumbnail. A small tooltip says "Play now on ‹bot›". After a send the icon turns into a check for 1.4s.
+- **Hover buttons.** Two 32px dark round icon buttons (Play now, Queue) at the top left of a thumbnail, with no text. They follow the thumbnail through scrolling and layout shifts and stay over YouTube's autoplay preview. After a send the icon turns into a check for 1.4s.
 - **Connection dialog.** A native `<dialog>` (focus trap, Esc, backdrop). It contains:
   - The fields with their hints, and a **Check connection** button that shows its status inline.
   - The default-bot radio list.
