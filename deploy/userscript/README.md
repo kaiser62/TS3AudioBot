@@ -1,25 +1,31 @@
 # TS3AudioBot Sender (YouTube userscript)
 
-Adds buttons to YouTube that send the video to one of the TeamSpeak music bots.
+Adds TeamSpeak controls to YouTube so you can send songs to a TS3AudioBot music bot without typing chat commands. The controls use YouTube's own colours, so they match light and dark mode.
 
-- **▶ Play on TS** / **+ Queue** under the video title, a bot picker, and what the bot is playing now
-- ▶ / + quick buttons when hovering a thumbnail (can be turned off in settings)
-- `Alt+P` play current video, `Alt+Q` queue it
-- Checkboxes on Mix / playlist entries (side panel and playlist pages): tick songs, Shift+click for a range, or **Select all N for TS** at the top of the Mix panel, then **+ Queue N** in the bar at the bottom left. Songs are added in playlist order; the button turns into **Stop** while it runs, and songs that fail stay ticked
-- Works on youtube.com (incl. Shorts), m.youtube.com and music.youtube.com
+- **Pick songs from Mixes and playlists.** Each song in a Mix panel or on a playlist page gets a checkbox. Shift+click selects a range, and **Select all N** sits in the Mix panel header. A tray then shows **Queue N on ‹bot›**.
+- **Progress and results.** While songs are sent one by one, the tray shows progress and a **Stop** button. When it finishes it says how many were queued. Songs that failed stay selected and **Why?** lists the reason for each, with **Try N again** to resend them.
+- **Under the video:** **Play** (play now) and **Queue** (add to the end), the bot that will receive it, and what that bot is playing now.
+- **On thumbnails:** Play and Queue buttons appear when you point at a video. You can turn them off in settings.
+- **Keyboard:** `Alt+P` plays the current video now and `Alt+Q` queues it.
+- **Choosing the bot:** click the bot name (green dot = online) anywhere to switch bots. The choice is remembered.
+- Works on youtube.com (including Shorts), m.youtube.com and music.youtube.com.
 
 ## Install
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/) (or Violentmonkey).
+1. Install [Tampermonkey](https://www.tampermonkey.net/) or Violentmonkey.
 2. Open https://raw.githubusercontent.com/kaiser62/TS3AudioBot/master/deploy/userscript/ts3audiobot.user.js and click **Install**.
-3. In TeamSpeak, send one of the bots a **private message**: `!api token`. It replies with a token.
-4. Get your TeamSpeak unique ID: *Tools → Identities →* your identity → *Unique ID* (ends with `=`).
-5. On YouTube: Tampermonkey menu → *TS3AudioBot Sender* → **Settings**. Server URL `https://music.basic.int.eu.org`, paste UID and token, **Test connection**, pick your default bot, **Save**.
+3. Open any YouTube video and click **Connect TS3AudioBot** under the title. The dialog asks for:
+   - **Server address:** the bot's web address, for example `https://music.example.org`. Ask whoever runs the bot.
+   - **Your TeamSpeak unique ID:** in TeamSpeak go to *Tools → Identities →* your identity → *Unique ID*. It ends with `=`.
+   - **API token:** send one of the bots a **private message** saying `!api token`. It replies with your token.
+4. Click **Check connection**, pick your default bot, then click **Save**.
 
-The first request asks Tampermonkey to allow the connection to the server — choose *Always allow domain*.
+The first request asks Tampermonkey to allow the connection to your server. Choose *Always allow domain*.
+
+You can reopen the settings with the bot name's menu (**Connection settings**) or from the Tampermonkey menu.
 
 ## Notes
 
-- Your token works like a password for the bot. Don't share it; get a new one with `!api token` any time (the old one stops working).
+- Your token works like a password for the bot, so don't share it. You can get a new one with `!api token` at any time, and the old one then stops working.
 - Requests run with your TeamSpeak identity's rights, the same as typing `!play` in chat.
-- Only `/api/*` is published through the tunnel; the bot's web interface stays internal.
+- The server needs the bot's web API reachable over HTTPS. See the main README for how to set that up.
