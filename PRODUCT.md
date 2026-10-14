@@ -7,7 +7,7 @@
 web
 
 ## Users
-TeamSpeak 3 server owners and their members who run their own copy of this TS3AudioBot fork. Each user points the companion clients at their own bot server. Setup has to make sense from the clients alone, with no help from the fork's author. The fork's author and their friends (server `music.basic.int.eu.org`) are one such group.
+TeamSpeak 3 server owners and their members who run their own copy of this TS3AudioBot fork. Each user points the companion clients at their own bot server. Setup has to make sense from the clients alone, with no help from the fork's author. The fork's author and their friends are one such group.
 
 Main job for the YouTube userscript: build a set for the bot from YouTube Mixes and playlists by picking many songs at once and sending them to the bot's queue. Sending the single video being watched (play now or queue) comes second.
 
