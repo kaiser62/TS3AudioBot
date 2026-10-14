@@ -2,8 +2,8 @@
 
 Sends songs from the Spotify desktop app to one of the TeamSpeak music bots.
 
-- Right-click a track, several selected tracks (Ctrl/Shift+click, or Ctrl+A in a playlist), an album or a playlist:
-  **Play on TS bot** or **Queue on TS bot**
+- Right-click a track, several selected tracks (Ctrl/Shift+click, or Ctrl+A in a playlist), an album, a playlist, Liked Songs or an artist (sends their top tracks):
+  **Play on TS bot** or **Queue on TS bot**. Playlists, albums and Liked Songs send at most 500 songs; playlist folders aren't supported
 - Button in the playbar: queue the song Spotify is playing now
 - Right-click a track and choose **TS bot settings** to set the server, login and bot
 

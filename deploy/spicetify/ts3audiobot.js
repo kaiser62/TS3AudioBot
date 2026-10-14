@@ -1,7 +1,7 @@
 // TS3AudioBot Sender for Spicetify
-// Right-click tracks (multi-select works), an album or a playlist -> "Play on TS bot" / "Queue on TS bot".
+// Right-click tracks (multi-select works), an album, a playlist, Liked Songs or an artist -> "Play on TS bot" / "Queue on TS bot".
 // The bot can't stream Spotify, so each track is sent as "artist - title" and the bot plays the top YouTube result.
-// Needs the fork's `search first play|add` commands (TS3AudioBot >= 0.12.8 of kaiser62/TS3AudioBot).
+// Needs the fork's `search first play|add` commands (TS3AudioBot >= 0.12.11 of kaiser62/TS3AudioBot).
 // @ts-check
 (async function ts3audiobot() {
 	while (!Spicetify?.ContextMenu || !Spicetify?.Player || !Spicetify?.URI || !Spicetify?.PopupModal || !Spicetify?.CosmosAsync) {
@@ -15,6 +15,8 @@
 	try { cfg = { ...DEFAULTS, ...JSON.parse(Spicetify.LocalStorage.get(KEY) || "{}") }; } catch (_) {}
 	const save = () => Spicetify.LocalStorage.set(KEY, JSON.stringify(cfg));
 	let bots = [];
+	// cap for playlists / albums / Liked Songs: each track is one bot request, sent one at a time
+	const MAX_TRACKS = 500;
 
 	const notify = (text, isError = false) => Spicetify.showNotification("TS3AudioBot: " + text, isError, isError ? 7000 : 3500);
 
@@ -42,7 +44,7 @@
 	const seg = (s) => "/" + encodeURIComponent(s).replace(/\(/g, "%28").replace(/\)/g, "%29");
 	const onBot = (id, ...cmd) => `/bot/use/${id}/(${cmd.map(seg).join("")})`;
 	const botName = (id) => (bots.find((b) => b.Id === id) || {}).Name || `bot ${id}`;
-	const loadBots = async () => (bots = await api("/bot/list"));
+	const loadBots = async () => { const list = await api("/bot/list"); return (bots = Array.isArray(list) ? list : []); };
 
 	// ---------- Spotify metadata ----------
 	const idOf = (uri) => {
@@ -171,20 +173,18 @@
 			const queryDef = Spicetify.GraphQL?.Definitions?.FetchPlaylistContents ||
 				Spicetify.GraphQL?.Definitions?.fetchPlaylistContents;
 			if (queryDef && Spicetify.GraphQL?.Request) {
-				const gRes = await Spicetify.GraphQL.Request(queryDef, {
-					uri: rawUri,
-					offset: 0,
-					limit: 100,
-				});
-				const items = gRes?.data?.playlistV2?.content?.items ||
-					gRes?.data?.playlist?.content?.items;
-				if (Array.isArray(items) && items.length) {
+				for (let offset = 0; offset < MAX_TRACKS; offset += 100) {
+					const gRes = await Spicetify.GraphQL.Request(queryDef, { uri: rawUri, offset, limit: 100 });
+					const content = gRes?.data?.playlistV2?.content || gRes?.data?.playlist?.content;
+					const items = content?.items;
+					if (!Array.isArray(items) || !items.length) break;
 					for (const it of items) {
 						const q = query(it);
 						if (q) tracks.push(q);
 					}
-					if (tracks.length) return tracks;
+					if (items.length < 100 || (content.totalCount && offset + 100 >= content.totalCount)) break;
 				}
+				if (tracks.length) return tracks.slice(0, MAX_TRACKS);
 			}
 		} catch (e) {
 			console.warn("GraphQL playlist fetch failed:", e);
@@ -193,8 +193,7 @@
 		// Method 2: Spotify Web API playlists/{id}/tracks (paged, returns names & artists)
 		try {
 			let url = `playlists/${id}/tracks?limit=100&fields=next,items(track(name,type,artists(name)))`;
-			let pages = 0;
-			while (url && pages < 5) {
+			while (url && tracks.length < MAX_TRACKS) {
 				const res = await webApi(url);
 				if (Array.isArray(res?.items) && res.items.length) {
 					for (const it of res.items) {
@@ -203,9 +202,8 @@
 					}
 				}
 				url = res?.next;
-				pages++;
 			}
-			if (tracks.length) return tracks;
+			if (tracks.length) return tracks.slice(0, MAX_TRACKS);
 		} catch (e) {
 			console.warn("Web API playlist fetch failed:", e);
 		}
@@ -213,7 +211,7 @@
 		// Method 3: Spicetify.Platform.PlaylistAPI.getContents
 		try {
 			if (Spicetify.Platform?.PlaylistAPI?.getContents) {
-				const pRes = await Spicetify.Platform.PlaylistAPI.getContents(rawUri, { limit: 1000 });
+				const pRes = await Spicetify.Platform.PlaylistAPI.getContents(rawUri, { limit: MAX_TRACKS });
 				if (Array.isArray(pRes?.items) && pRes.items.length) {
 					const missingUris = [];
 					for (const it of pRes.items) {
@@ -277,7 +275,7 @@
 
 		// Method 2: Web API albums/{id}/tracks
 		try {
-			for (let url = `albums/${id}/tracks?limit=50`; url; ) {
+			for (let url = `albums/${id}/tracks?limit=50`; url && tracks.length < MAX_TRACKS; ) {
 				const res = await webApi(url);
 				if (Array.isArray(res?.items)) {
 					for (const t of res.items) {
@@ -296,19 +294,21 @@
 	async function resolveLikedTracks() {
 		const tracks = [];
 		try {
-			const res = await webApi("me/tracks?limit=50");
-			if (Array.isArray(res?.items)) {
+			for (let url = "me/tracks?limit=50"; url && tracks.length < MAX_TRACKS; ) {
+				const res = await webApi(url);
+				if (!Array.isArray(res?.items) || !res.items.length) break;
 				for (const it of res.items) {
 					const q = query(it?.track);
 					if (q) tracks.push(q);
 				}
-				if (tracks.length) return tracks;
+				url = res.next;
 			}
+			if (tracks.length) return tracks.slice(0, MAX_TRACKS);
 		} catch (_) {}
 
 		try {
 			if (Spicetify.Platform?.LibraryAPI?.getTracks) {
-				const res = await Spicetify.Platform.LibraryAPI.getTracks({ limit: 50 });
+				const res = await Spicetify.Platform.LibraryAPI.getTracks({ limit: MAX_TRACKS });
 				if (Array.isArray(res?.items)) {
 					for (const it of res.items) {
 						const q = query(it?.track || it);
@@ -319,6 +319,43 @@
 			}
 		} catch (_) {}
 
+		return tracks;
+	}
+
+	// ---------- artist resolver: the artist's top tracks ----------
+	async function resolveArtist(uri) {
+		const id = idOf(uri);
+		const rawUri = String(uri).startsWith("spotify:") ? String(uri) : `spotify:artist:${id}`;
+		const tracks = [];
+
+		// Method 1: GraphQL queryArtistOverview (what the artist page itself shows)
+		try {
+			const queryDef = Spicetify.GraphQL?.Definitions?.queryArtistOverview;
+			if (queryDef && Spicetify.GraphQL?.Request) {
+				const gRes = await Spicetify.GraphQL.Request(queryDef, { uri: rawUri, locale: "", includePrerelease: false });
+				const items = gRes?.data?.artistUnion?.discography?.topTracks?.items;
+				if (Array.isArray(items)) {
+					for (const it of items) {
+						const q = query(it?.track || it);
+						if (q) tracks.push(q);
+					}
+					if (tracks.length) return tracks;
+				}
+			}
+		} catch (e) {
+			console.warn("GraphQL artist fetch failed:", e);
+		}
+
+		// Method 2: Web API artists/{id}/top-tracks
+		try {
+			const res = await webApi(`artists/${id}/top-tracks?market=from_token`);
+			for (const t of res?.tracks || []) {
+				const q = query(t);
+				if (q) tracks.push(q);
+			}
+		} catch (e) {
+			console.warn("Web API artist top tracks failed:", e);
+		}
 		return tracks;
 	}
 
@@ -413,6 +450,9 @@
 			} else if (type === "collection") {
 				const liked = await resolveLikedTracks();
 				out.push(...liked);
+			} else if (type === "artist") {
+				const top = await resolveArtist(uri);
+				out.push(...top);
 			}
 		}
 
@@ -528,7 +568,8 @@
 	// ---------- menus ----------
 	const isSupportedUri = (u) => {
 		const type = getUriType(u);
-		if (["track", "album", "playlist", "collection", "artist", "folder"].includes(type)) return true;
+		if (["track", "album", "playlist", "collection", "artist"].includes(type)) return true;
+		if (type === "folder") return false; // playlist folders: nothing to resolve them with
 		try {
 			if (Spicetify.URI.isTrack(u) || Spicetify.URI.isAlbum(u) || Spicetify.URI.isPlaylistV1OrV2(u)) return true;
 		} catch (_) {}
