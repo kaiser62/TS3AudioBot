@@ -1421,7 +1421,7 @@ namespace TS3AudioBot
 		private static readonly System.Text.RegularExpressions.Regex SearchFillerSuffix = new System.Text.RegularExpressions.Regex(
 			@"(\s+(lyrics?|explicit|official|audio|video|hq|hd))+\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 		private static readonly System.Text.RegularExpressions.Regex SearchBrackets = new System.Text.RegularExpressions.Regex(
-			@"\s*[(\[（【][^)\]）】]*[)\]）】]");
+			@"\s*[(\[\uFF08\u3010][^)\]\uFF09\u3011]*[)\]\uFF09\u3011]");
 		private static readonly System.Text.RegularExpressions.Regex SearchSpaces = new System.Text.RegularExpressions.Regex(@"\s+");
 
 		private static IEnumerable<string> SearchFallbacks(string query)
