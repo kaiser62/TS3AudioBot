@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TS3AudioBot Sender
 // @namespace    https://github.com/kaiser62/TS3AudioBot
-// @version      1.3.0
+// @version      1.3.1
 // @description  Send YouTube videos, or songs picked from Mixes and playlists, to a TS3AudioBot TeamSpeak music bot.
 // @author       kaiser62
 // @match        https://www.youtube.com/*
@@ -185,7 +185,7 @@ html[dark],html:has(ytmusic-app){
 .tsab-bar.compact .tsab-btn:not(.tsab-chip) .tsab-label,.tsab-bar.compact .tsab-on,.tsab-bar.compact .tsab-np,.tsab-bar.compact .tsab-setup-note{display:none}
 .tsab-bar.compact .tsab-chip{max-width:150px}
 
-.tsab-hover{position:fixed;z-index:2050;display:flex;align-items:center;gap:4px;font:400 12px/16px var(--tsab-font)}
+.tsab-hover{position:fixed;z-index:2200;display:flex;align-items:center;gap:4px;font:400 12px/16px var(--tsab-font)}
 .tsab-hover button{display:grid;place-items:center;width:32px;height:32px;padding:0;border:0;border-radius:50%;
   background:rgba(0,0,0,.72);color:#fff;cursor:pointer;transition:background-color .15s}
 .tsab-hover button:hover{background:rgba(0,0,0,.92)}
@@ -694,11 +694,14 @@ html[dark],html:has(ytmusic-app){
 	// ---------- hover buttons on thumbnails ----------
 	let hoverBox, hoverFor;
 	function hideHover() { if (hoverBox) hoverBox.remove(); hoverBox = null; hoverFor = null; }
+	// YouTube's hover autoplay lays a separate preview player over the thumbnail; it counts as the same thumbnail
+	const PREVIEW = "ytd-video-preview, #video-preview, ytd-moving-thumbnail-renderer, #inline-preview-player";
+	const inZone = (t) => !!(t && t.nodeType === 1 && ((hoverBox && hoverBox.contains(t)) || (hoverFor && hoverFor.contains(t)) || t.closest(PREVIEW)));
 	document.addEventListener("mouseover", (e) => {
 		if (!cfg.hoverButtons) return;
-		if (hoverBox && hoverBox.contains(e.target)) return;
-		// pointer left both the thumbnail and our buttons (mouseleave can be missed after overlay round trips)
-		if (hoverBox && hoverFor && !hoverFor.contains(e.target)) hideHover();
+		if (hoverBox && inZone(e.target)) return;
+		// pointer left the thumbnail, its preview and our buttons (mouseleave can be missed after overlay round trips)
+		if (hoverBox) hideHover();
 		const a = e.target.closest && e.target.closest("a[href*='/watch?v='], a[href^='/shorts/'], a[href*='youtu.be/']");
 		if (!a) return;
 		if (a.closest(LIST_ITEMS)) return; // Mix / playlist rows have checkboxes instead
@@ -724,8 +727,8 @@ html[dark],html:has(ytmusic-app){
 		};
 		hoverBox = h("div", { class: "tsab-hover", style: { top: `${r.top + 6}px`, left: `${r.left + 6}px` } },
 			mk("play", "play", "Play now"), mk("queue", "add", "Queue"), tip);
-		hoverBox.addEventListener("mouseleave", (ev) => { if (!a.contains(ev.relatedTarget)) hideHover(); });
-		a.addEventListener("mouseleave", (ev) => { if (!hoverBox || !hoverBox.contains(ev.relatedTarget)) hideHover(); }, { once: true });
+		hoverBox.addEventListener("mouseleave", (ev) => { if (!inZone(ev.relatedTarget)) hideHover(); });
+		a.addEventListener("mouseleave", (ev) => { if (!inZone(ev.relatedTarget)) hideHover(); }, { once: true });
 		document.body.append(hoverBox);
 	}, true);
 
