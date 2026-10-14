@@ -120,6 +120,7 @@ Upstream calls a local `youtube-dl` binary. This fork points `[factories.youtube
 - persistent yt-dlp cache volume (`$HOME/.cache/yt-dlp-docker` → `XDG_CACHE_HOME`) so player/JS-challenge results are reused instead of re-solved each call;
 - `--socket-timeout 5` so blackholed connections fail over fast instead of hitting the bot's hard 20s yt-dlp limit;
 - `--extractor-args youtube:skip=hls` to skip HLS manifest fetches (≈halves lookup time). **Trade-off:** YouTube live streams don't play.
+- the bot's arguments reach yt-dlp as positional parameters, never as shell text, so searches with apostrophes or other shell characters work and cannot run commands in the container;
 - optional stderr debug log (`YTDL_DEBUG_LOG=...`). Note the bot treats *any* stderr output from yt-dlp as failure.
 
 ### 3. ffmpeg chunking shim — deployment (`deploy/ffmpeg-wrap.sh`, `deploy/ytchunk.py`)
@@ -151,7 +152,6 @@ GitVersion needs local `master` and `develop` branches in the clone (`git fetch 
 ### Known issues
 - On the production host ~40% of IPv4 TCP SYNs to Google IPs are silently dropped (other hosts on the LAN and non-Google destinations are fine); connects hang ~20s then fall back to IPv6 which is unreachable. The `--socket-timeout 5`, `skip=hls`, and ytchunk timeouts are mitigations, not a fix. Root cause (host firewall / VPN / router) still open.
 - YouTube live streams are disabled by `skip=hls`.
-- `deploy/youtube-dl` builds a `sh -c` string by wrapping each argument in single quotes. A search containing an apostrophe (e.g. *Don't Stop Me Now*) therefore fails, and a crafted query can run commands inside the yt-dlp container, which has `cookies.txt` mounted. Until this is fixed, only grant `cmd.search.*` / `cmd.play` to people you trust, and treat the cookies as exposed to them.
 
 ---
 

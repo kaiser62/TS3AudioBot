@@ -33,14 +33,18 @@
 		try {
 			r = await fetch(cfg.baseUrl.replace(/\/+$/, "") + "/api" + path, { headers, signal: ctl.signal });
 		} catch (e) {
-			throw new Error(e.name === "AbortError" ? "Bot server did not answer in time." : "Cannot reach the bot server.");
+			const err = new Error(e.name === "AbortError" ? "Bot server did not answer in time." : "Cannot reach the bot server.");
+			err.network = true;
+			throw err;
 		} finally { clearTimeout(timer); }
 		const text = await r.text();
 		let body = null;
 		try { body = text ? JSON.parse(text) : null; } catch (_) { body = text; }
 		if (r.ok) return body;
 		const msg = (body && body.ErrorMessage) || `HTTP ${r.status}`;
-		throw new Error(r.status === 401 ? `${msg} (check your UID/token in settings)` : msg);
+		const err = new Error(r.status === 401 ? `${msg} (check your UID/token in settings)` : msg);
+		err.status = r.status;
+		throw err;
 	}
 	// Same escaping as the official web interface: encodeURIComponent plus parentheses.
 	const seg = (s) => "/" + encodeURIComponent(s).replace(/\(/g, "%28").replace(/\)/g, "%29");
@@ -526,7 +530,14 @@
 				try {
 					await api(onBot(botId, "search", "first", cmd, "youtube", withSuffix(q)));
 				} catch (e) {
-					failed.push(`${q}: ${e.message}`);
+					// the suffix can leave a long query with no YouTube results at all; then try the plain query once
+					const retry = withSuffix(q) !== q && !e.network && e.status !== 401;
+					try {
+						if (!retry) throw e;
+						await api(onBot(botId, "search", "first", cmd, "youtube", q));
+					} catch (e2) {
+						failed.push(`${q}: ${e2.message}`);
+					}
 				}
 				done++;
 			}

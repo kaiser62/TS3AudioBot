@@ -8,21 +8,14 @@ exec 2> >(tee -a "$DBG_LOG" >&2; echo "=== $(date '+%F %T.%3N') pid=$$ END (stde
 # --- end debug logging ---
 
 COOKIES="$HERE/cookies.txt"
-COOKIES_MOUNT=""
-COOKIES_FLAG=""
-
+DOCKER_OPTS=(--rm)
+YTDLP_OPTS=()
 if [ -f "$COOKIES" ]; then
-  COOKIES_MOUNT="-v $COOKIES:/config/cookies.txt"
-  COOKIES_FLAG="--cookies /config/cookies.txt"
+  DOCKER_OPTS+=(-v "$COOKIES:/config/cookies.txt")
+  YTDLP_OPTS+=(--cookies /config/cookies.txt)
 fi
 
-# Build command: yt-dlp + flags + all original args, properly quoted for sh -c
-ARGS=""
-for arg in "$@"; do
-  ARGS="$ARGS '$arg'"
-done
-
-exec docker run --rm $COOKIES_MOUNT \
-  -v "${YTDL_CACHE_DIR:-$HOME/.cache/yt-dlp-docker}":/cache -e XDG_CACHE_HOME=/cache \
-  jeeaaasustest/youtube-dl:latest \
-  sh -c "yt-dlp $COOKIES_FLAG --socket-timeout 5 --extractor-args youtube:skip=hls $ARGS"
+# The bot's arguments reach yt-dlp as positional parameters ("$@" inside sh -c), never as
+# shell text, so apostrophes and other shell characters in a search arrive unchanged and
+# cannot run commands in the container.
+exec docker run "${DOCKER_OPTS[@]}"   -v "${YTDL_CACHE_DIR:-$HOME/.cache/yt-dlp-docker}":/cache -e XDG_CACHE_HOME=/cache   jeeaaasustest/youtube-dl:latest   sh -c 'exec yt-dlp "$@"' yt-dlp "${YTDLP_OPTS[@]}" --socket-timeout 5 --extractor-args youtube:skip=hls "$@"
