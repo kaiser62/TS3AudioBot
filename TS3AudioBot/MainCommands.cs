@@ -1400,12 +1400,65 @@ namespace TS3AudioBot
 		public static async Task CommandSearchFirstAdd(PlayManager playManager, InvokerData invoker, ResolveContext resolver, string resolverName, string query)
 			=> await playManager.Enqueue(invoker, await SearchFirst(resolver, resolverName, query));
 
+		// YouTube returns nothing for some over-specific queries (e.g. "Game, Artist - Title lyrics explicit"),
+		// so on zero results retry with progressively looser versions of the query.
 		private static async Task<AudioResource> SearchFirst(ResolveContext resolver, string resolverName, string query)
 		{
-			var list = await resolver.Search(resolverName, query);
-			if (list.Count == 0)
-				throw new CommandException(strings.cmd_search_no_result, CommandExceptionReason.CommandError);
-			return list[0];
+			foreach (var attempt in SearchFallbacks(query))
+			{
+				var list = await resolver.Search(resolverName, attempt);
+				if (list.Count > 0)
+				{
+					if (attempt != query)
+						SearchLog.Info("search first: no results for \"{0}\", used \"{1}\"", query, attempt);
+					return list[0];
+				}
+			}
+			throw new CommandException(strings.cmd_search_no_result, CommandExceptionReason.CommandError);
+		}
+
+		private static readonly NLog.Logger SearchLog = NLog.LogManager.GetLogger("TS3AudioBot.SearchFirst");
+		private static readonly System.Text.RegularExpressions.Regex SearchFillerSuffix = new System.Text.RegularExpressions.Regex(
+			@"(\s+(lyrics?|explicit|official|audio|video|hq|hd))+\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+		private static readonly System.Text.RegularExpressions.Regex SearchBrackets = new System.Text.RegularExpressions.Regex(
+			@"\s*[(\[（【][^)\]）】]*[)\]）】]");
+		private static readonly System.Text.RegularExpressions.Regex SearchSpaces = new System.Text.RegularExpressions.Regex(@"\s+");
+
+		private static IEnumerable<string> SearchFallbacks(string query)
+		{
+			var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			string Clean(string q) => SearchSpaces.Replace(q, " ").Trim();
+
+			var current = Clean(query);
+			seen.Add(current);
+			yield return query;
+
+			// 1. Drop trailing filler words such as "lyrics explicit".
+			current = Clean(SearchFillerSuffix.Replace(current, ""));
+			if (current.Length > 0 && seen.Add(current)) yield return current;
+
+			// 2. Drop bracketed parts: "(Original Game Soundtrack)", "[Remastered]".
+			current = Clean(SearchBrackets.Replace(current, ""));
+			if (current.Length > 0 && seen.Add(current)) yield return current;
+
+			// 3. "A, B - Title" -> "B - Title", then "A - Title": senders often list
+			//    an album/game name or several artists first.
+			var dash = current.IndexOf(" - ", StringComparison.Ordinal);
+			if (dash > 0)
+			{
+				var title = current.Substring(dash + 3).Trim();
+				var artists = current.Substring(0, dash)
+					.Split(new[] { ",", " & ", " feat. ", " ft. " }, StringSplitOptions.RemoveEmptyEntries)
+					.Select(a => a.Trim()).Where(a => a.Length > 0).ToArray();
+				if (artists.Length > 1 && title.Length > 0)
+				{
+					foreach (var artist in new[] { artists[artists.Length - 1], artists[0] })
+					{
+						var q = artist + " - " + title;
+						if (seen.Add(q)) yield return q;
+					}
+				}
+			}
 		}
 
 		[Command("search get", "_undocumented")] // TODO Doc
