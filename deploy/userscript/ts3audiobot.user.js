@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TS3AudioBot Sender
 // @namespace    https://github.com/kaiser62/TS3AudioBot
-// @version      1.3.1
+// @version      1.3.2
 // @description  Send YouTube videos, or songs picked from Mixes and playlists, to a TS3AudioBot TeamSpeak music bot.
 // @author       kaiser62
 // @match        https://www.youtube.com/*
@@ -692,30 +692,51 @@ html[dark],html:has(ytmusic-app){
 	}
 
 	// ---------- hover buttons on thumbnails ----------
-	let hoverBox, hoverFor;
-	function hideHover() { if (hoverBox) hoverBox.remove(); hoverBox = null; hoverFor = null; }
+	let hoverBox, hoverFor, hoverThumb, hoverTimer;
+	function hideHover() { if (hoverBox) hoverBox.remove(); clearTimeout(hoverTimer); hoverBox = hoverFor = hoverThumb = null; }
 	// YouTube's hover autoplay lays a separate preview player over the thumbnail; it counts as the same thumbnail
 	const PREVIEW = "ytd-video-preview, #video-preview, ytd-moving-thumbnail-renderer, #inline-preview-player";
+	const VIDEO_LINK = "a[href*='/watch?v='], a[href^='/shorts/'], a[href*='youtu.be/']";
 	const inZone = (t) => !!(t && t.nodeType === 1 && ((hoverBox && hoverBox.contains(t)) || (hoverFor && hoverFor.contains(t)) || t.closest(PREVIEW)));
+	// the box is position:fixed, so it follows the thumbnail through scrolling and layout shifts
+	function followHover() {
+		clearTimeout(hoverTimer);
+		if (!hoverBox) return;
+		const r = hoverThumb.isConnected ? hoverThumb.getBoundingClientRect() : null;
+		if (!r || r.width < 120 || !r.height) return hideHover();
+		const top = `${Math.round(r.top + 6)}px`, left = `${Math.round(r.left + 6)}px`;
+		if (hoverBox.style.top !== top) hoverBox.style.top = top;
+		if (hoverBox.style.left !== left) hoverBox.style.left = left;
+		hoverTimer = setTimeout(followHover, 120);
+	}
+	// what the pointer is on: a thumbnail link, or the preview player that covers one
+	function hoverTarget(t) {
+		const pv = t.closest(PREVIEW);
+		if (pv) {
+			const link = pv.querySelector(VIDEO_LINK);
+			return link ? { zone: pv, href: link.href, thumb: pv } : null;
+		}
+		const a = t.closest(VIDEO_LINK);
+		if (!a || a.closest(LIST_ITEMS)) return null; // Mix / playlist rows have checkboxes instead
+		const img = a.querySelector("img, yt-image, yt-thumbnail-view-model");
+		if (!img) return null; // only thumbnails, not every text link
+		// anchor to the thumbnail, not the link: some links span a whole row
+		return { zone: a, href: a.href, thumb: a.querySelector("ytd-thumbnail, yt-thumbnail-view-model, yt-image, img") || img };
+	}
 	document.addEventListener("mouseover", (e) => {
-		if (!cfg.hoverButtons) return;
+		if (!cfg.hoverButtons || !e.target.closest) return;
 		if (hoverBox && inZone(e.target)) return;
 		// pointer left the thumbnail, its preview and our buttons (mouseleave can be missed after overlay round trips)
 		if (hoverBox) hideHover();
-		const a = e.target.closest && e.target.closest("a[href*='/watch?v='], a[href^='/shorts/'], a[href*='youtu.be/']");
-		if (!a) return;
-		if (a.closest(LIST_ITEMS)) return; // Mix / playlist rows have checkboxes instead
-		const img = a.querySelector("img, yt-image, yt-thumbnail-view-model");
-		if (!img) return; // only thumbnails, not every text link
-		if (hoverFor === a) return;
-		const id = videoIdFrom(a.href);
+		const target = hoverTarget(e.target);
+		if (!target) return;
+		const id = videoIdFrom(target.href);
 		if (!id) return;
-		hideHover();
-		// anchor to the thumbnail, not the link: some links span a whole row
-		const thumb = a.querySelector("ytd-thumbnail, yt-thumbnail-view-model, yt-image, img") || img;
-		const r = thumb.getBoundingClientRect();
+		const r = target.thumb.getBoundingClientRect();
 		if (r.width < 120 || !r.height) return;
+		const a = target.zone;
 		hoverFor = a;
+		hoverThumb = target.thumb;
 		const tip = h("span", { class: "tip" });
 		const mk = (iconName, mode, label) => {
 			const b = h("button", { type: "button", "aria-label": label, onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); send(id, mode, b); } },
@@ -730,6 +751,7 @@ html[dark],html:has(ytmusic-app){
 		hoverBox.addEventListener("mouseleave", (ev) => { if (!inZone(ev.relatedTarget)) hideHover(); });
 		a.addEventListener("mouseleave", (ev) => { if (!inZone(ev.relatedTarget)) hideHover(); }, { once: true });
 		document.body.append(hoverBox);
+		hoverTimer = setTimeout(followHover, 120);
 	}, true);
 
 	// ---------- multi-select on Mixes and playlists ----------
@@ -991,7 +1013,7 @@ html[dark],html:has(ytmusic-app){
 
 	// ---------- SPA navigation ----------
 	document.addEventListener("scroll", (e) => {
-		hideHover();
+		followHover(); // keep the thumbnail buttons on their thumbnail; the next mouseover swaps them if the card changed
 		if (pop && !pop.contains(e.target)) closePop();
 		queuePlace();
 	}, { capture: true, passive: true });
