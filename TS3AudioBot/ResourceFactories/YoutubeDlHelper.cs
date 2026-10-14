@@ -111,7 +111,7 @@ namespace TS3AudioBot.ResourceFactories
 		{
 			try
 			{
-				bool stdOutDone = false;
+				bool stdOutDone = false, stdErrDone = false;
 				var stdOut = new StringBuilder();
 				var stdErr = new StringBuilder();
 
@@ -136,7 +136,10 @@ namespace TS3AudioBot.ResourceFactories
 				tmproc.ErrorDataReceived += (s, e) =>
 				{
 					if (e.Data is null)
+					{
+						stdErrDone = true;
 						return;
+					}
 					if (stdErr.Length > 0)
 						stdErr.Append('\n');
 					stdErr.Append(e.Data);
@@ -152,12 +155,16 @@ namespace TS3AudioBot.ResourceFactories
 					catch (Exception ex) { Log.Debug(ex, "Failed to kill"); }
 				}
 
+				// Wait for both streams to close, not just stdout: wrappers (e.g. a debug tee) can keep stderr open a
+				// moment longer, and disposing the process while its stderr read is pending loses late error text and
+				// raises an ObjectDisposedException on the reader task.
 				var timeout = Stopwatch.StartNew();
-				while (!stdOutDone)
+				while (!stdOutDone || !stdErrDone)
 				{
 					if (timeout.Elapsed >= TimeSpan.FromSeconds(5))
 					{
-						stdErr.Append(strings.error_ytdl_empty_response).Append(" (timeout)");
+						if (!stdOutDone) // a stderr that stays open is not an error on its own
+							stdErr.Append(strings.error_ytdl_empty_response).Append(" (timeout)");
 						break;
 					}
 					await Task.Delay(50);
