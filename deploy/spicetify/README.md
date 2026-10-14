@@ -7,7 +7,7 @@ Sends songs from the Spotify desktop app to one of the TeamSpeak music bots.
 - Button in the playbar: queue the song Spotify is playing now
 - Right-click a track and choose **TS bot settings** to set the server, login and bot
 
-The bot can't stream from Spotify. For each track the extension sends `artist - title`, and the bot plays the top YouTube search result. Most songs match, but you can get a cover, a live version or a lyric video. With **Play**, the first track starts now and the rest are queued after it. Click the menu item again while a long list is being sent to stop it.
+The bot can't stream from Spotify. For each track the extension sends `artist - title`, and the bot plays the top YouTube search result. By default the extension adds `lyrics explicit` to every search. This favours plain audio uploads over music videos with intros or skits, and uncensored versions over radio edits. You can change these words, or clear them, in **TS bot settings**. Most songs match, but you can still get a cover or a live version. With **Play**, the first track starts now and the rest are queued after it. Click the menu item again while a long list is being sent to stop it.
 
 ## Install
 

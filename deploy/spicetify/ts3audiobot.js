@@ -10,7 +10,9 @@
 
 	// ---------- settings ----------
 	const KEY = "ts3audiobot:settings";
-	const DEFAULTS = { baseUrl: "https://music.basic.int.eu.org", uid: "", token: "", botId: 0 };
+	// searchSuffix is appended to every YouTube search: "lyrics" favours plain audio uploads over music videos with
+	// intros/skits, "explicit" favours uncensored versions. Empty turns it off.
+	const DEFAULTS = { baseUrl: "https://music.basic.int.eu.org", uid: "", token: "", botId: 0, searchSuffix: "lyrics explicit" };
 	let cfg = { ...DEFAULTS };
 	try { cfg = { ...DEFAULTS, ...JSON.parse(Spicetify.LocalStorage.get(KEY) || "{}") }; } catch (_) {}
 	const save = () => Spicetify.LocalStorage.set(KEY, JSON.stringify(cfg));
@@ -505,6 +507,8 @@
 	// ---------- sending ----------
 	let running = null;
 
+	const withSuffix = (q) => { const sfx = (cfg.searchSuffix || "").trim(); return sfx ? `${q} ${sfx}` : q; };
+
 	async function sendQueries(queries, mode) {
 		if (running) { running.stop = true; notify("Stopping..."); return; }
 		if (!cfg.uid || !cfg.token) { openSettings(); return; }
@@ -520,7 +524,7 @@
 				const cmd = mode === "play" && i === 0 ? "play" : "add";
 				notify(`${queries.length > 1 ? `${i + 1}/${queries.length} ` : ""}${cmd === "play" ? "Playing" : "Queueing"} on ${botName(botId)}: ${q}`);
 				try {
-					await api(onBot(botId, "search", "first", cmd, "youtube", q));
+					await api(onBot(botId, "search", "first", cmd, "youtube", withSuffix(q)));
 				} catch (e) {
 					failed.push(`${q}: ${e.message}`);
 				}
@@ -572,6 +576,7 @@
 		const uid = el("input", { type: "text", value: cfg.uid, placeholder: "TeamSpeak unique ID, ends with =", style: field });
 		const token = el("input", { type: "password", value: cfg.token, placeholder: "from a private message: !api token", style: field });
 		const bot = el("select", { style: field });
+		const suffix = el("input", { type: "text", value: cfg.searchSuffix, placeholder: "empty = search for the plain title", style: field });
 		const status = el("div", { style: { minHeight: "18px", fontSize: "13px", opacity: ".8" } });
 		const fillBots = (list) => {
 			bot.replaceChildren(...list.map((b) => el("option", { value: String(b.Id), textContent: `${b.Name} (#${b.Id})`, selected: b.Id === cfg.botId })));
@@ -593,12 +598,14 @@
 				el("label", { textContent: "TeamSpeak UID" }), uid,
 				el("label", { textContent: "API token" }), token,
 				el("label", { textContent: "Bot" }), bot,
+				el("label", { textContent: "Words added to every YouTube search" }), suffix,
 				status,
 				el("div", { style: { display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "12px" } },
 					el("button", { textContent: "Test connection", style: { ...btn, background: "#333", color: "#fff" }, onclick: test }),
 					el("button", { textContent: "Save", style: { ...btn, background: "#1ed760", color: "#000" }, onclick: () => {
 						apply();
 						cfg.botId = Number(bot.value) || 0;
+						cfg.searchSuffix = suffix.value.trim();
 						save();
 						Spicetify.PopupModal.hide();
 						notify(`Saved. Sending to ${botName(cfg.botId)}.`);
