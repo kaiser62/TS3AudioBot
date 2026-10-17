@@ -1,0 +1,138 @@
+name: Build
+
+# Every push and PR is built and packaged.
+# - push to master: the rolling "master-latest" prerelease is updated; servers running
+#   deploy/autodeploy.sh pick it up from there.
+# - push of a v* tag: a GitHub Release with the tarball, userscript and Spotify extension.
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PKG: TS3AudioBot-linux-x64.tar.gz
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.pkg.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # GitVersion needs the full history and tags
+
+      - name: Create local master and develop branches (GitVersion needs them)
+        run: |
+          current=$(git branch --show-current)
+          for b in master develop; do
+            [ "$b" = "$current" ] || git branch -f "$b" "origin/$b"
+          done
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 16 # webpack 4
+
+      - name: Build web interface
+        working-directory: WebInterface
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build bot and run tests
+        run: |
+          docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:3.1 bash -ec '
+            export PATH=$PATH:/root/.dotnet/tools
+            dotnet tool install -g dotnet-script --version 1.1.0 >/dev/null
+            dotnet tool install -g GitVersion.Tool --version 5.12.0 >/dev/null
+            git config --global --add safe.directory /src
+            dotnet test TS3ABotUnitTests -c Release
+            dotnet publish TS3AudioBot -c Release --framework netcoreapp3.1 --self-contained --runtime linux-x64 \
+              -p:PublishSingleFile=true,IncludeSymbolsInSingleFile=true,PublishTrimmed=true
+          '
+          sudo chown -R "$(id -u):$(id -g)" .
+
+      - name: Package
+        id: pkg
+        run: |
+          bin=TS3AudioBot/bin/Release/netcoreapp3.1/linux-x64/publish/TS3AudioBot
+          version=$("$bin" --version | sed -n 's/^Version: //p')
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          out=out/TS3AudioBot
+          mkdir -p "$out"
+          install -m 755 "$bin" "$out/TS3AudioBot"
+          cp -r WebInterface/dist "$out/WebInterface"
+          cp README.md LICENSE LICENSE_COMPLETE "$out/"
+          mkdir "$out/deploy"
+          git ls-files deploy | grep -v -e '^deploy/userscript/' -e '^deploy/spicetify/' \
+            | while read -r f; do install -D -m "$(test -x "$f" && echo 755 || echo 644)" "$f" "$out/$f"; done
+          printf 'commit=%s\nversion=%s\n' "$GITHUB_SHA" "$version" > "$out/BUILD_INFO"
+
+          mkdir dist
+          tar --owner=0 --group=0 --numeric-owner -C out -czf "dist/$PKG" TS3AudioBot
+          cp deploy/userscript/ts3audiobot.user.js deploy/spicetify/ts3audiobot.js dist/
+          cp "$out/BUILD_INFO" dist/build-info.txt
+          (cd dist && sha256sum -b "$PKG" ts3audiobot.user.js ts3audiobot.js > SHA256SUMS.txt)
+          cat dist/build-info.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TS3AudioBot-${{ steps.pkg.outputs.version }}
+          path: dist/
+          retention-days: 14
+
+  publish:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: TS3AudioBot-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Update master-latest prerelease
+        if: github.ref == 'refs/heads/master'
+        run: |
+          tag=master-latest
+          gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$GITHUB_SHA" -F force=true >/dev/null \
+            || gh api -X POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
+          notes="Automatic build of master at ${GITHUB_SHA::8} (bot version $VERSION). Not a stable release; it is replaced on every push to master."
+          gh release view "$tag" >/dev/null 2>&1 \
+            || gh release create "$tag" --prerelease --title "Latest master build" --notes "$notes"
+          gh release edit "$tag" --prerelease --notes "$notes"
+          # build-info.txt goes last: deploy/autodeploy.sh treats it as "the new build is complete".
+          gh release upload "$tag" --clobber dist/$PKG dist/ts3audiobot.user.js dist/ts3audiobot.js dist/SHA256SUMS.txt
+          gh release upload "$tag" --clobber dist/build-info.txt
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag=${GITHUB_REF#refs/tags/}
+          named="TS3AudioBot-${tag#v}-linux-x64.tar.gz"
+          mv "dist/$PKG" "dist/$named"
+          (cd dist && sha256sum -b "$named" ts3audiobot.user.js ts3audiobot.js > SHA256SUMS.txt)
+          files="dist/$named dist/ts3audiobot.user.js dist/ts3audiobot.js dist/SHA256SUMS.txt"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" --clobber $files
+          else
+            gh release create "$tag" --title "TS3AudioBot $tag" --generate-notes $files
+          fi

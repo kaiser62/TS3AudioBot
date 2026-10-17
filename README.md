@@ -28,6 +28,8 @@ Get the latest build from [Releases](https://github.com/kaiser62/TS3AudioBot/rel
 
 Only Linux x64 is built. For other platforms, build from source (see [Building](#6-building)).
 
+Every push to `master` is also built by CI and published as the [`master-latest`](https://github.com/kaiser62/TS3AudioBot/releases/tag/master-latest) prerelease (same assets, tarball named `TS3AudioBot-linux-x64.tar.gz`). It is untested beyond the unit tests; use a numbered release unless you want the newest fixes. A server can follow it automatically with `deploy/autodeploy.sh`.
+
 ## Quick start (server owner)
 
 1. **Install the dependencies:**
@@ -146,6 +148,8 @@ git config --global --add safe.directory /src
 dotnet publish TS3AudioBot -c Release --framework netcoreapp3.1 --self-contained --runtime linux-x64 \
   -p:PublishSingleFile=true,IncludeSymbolsInSingleFile=true,PublishTrimmed=true
 ```
+
+CI does the same in [`.github/workflows/build.yml`](.github/workflows/build.yml): it builds the web interface (Node 16, webpack 4), runs `TS3ABotUnitTests`, publishes the bot and packages the tarball. Pushing a `v*` tag publishes a GitHub Release with the tarball, the userscript and the Spotify extension.
 
 GitVersion needs local `master` and `develop` branches in the clone (`git fetch origin master:master develop:develop`), otherwise it fails with *"could not determine which branch to treat as development"*.
 

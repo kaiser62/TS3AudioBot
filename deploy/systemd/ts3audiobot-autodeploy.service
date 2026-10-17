@@ -1,0 +1,7 @@
+[Unit]
+Description=Install new TS3AudioBot builds from the master-latest release
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/audiobot/ts3audio-new/autodeploy.sh

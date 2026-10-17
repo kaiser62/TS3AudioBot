@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for new TS3AudioBot builds every 10 min
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
